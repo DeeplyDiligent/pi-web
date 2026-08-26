@@ -13,6 +13,7 @@ import { SkillsConfig } from "./SkillsConfig";
 import { PluginsConfig } from "./PluginsConfig";
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { BranchNavigator } from "./BranchNavigator";
+import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { useTheme } from "@/hooks/useTheme";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -45,7 +46,7 @@ import {
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
 } from "@/lib/panel-layout";
-import type { BlockingExtensionUiRequest, SessionInfo, SessionTreeNode } from "@/lib/types";
+import type { BlockingExtensionUiRequest, ExtensionStatusItem, SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ProjectTrustStatus } from "@/lib/api-types";
 import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
@@ -215,12 +216,16 @@ export function AppShell() {
 
   // Session stats (tokens + cost) — populated by ChatWindow, displayed in top bar
   const [sessionStats, setSessionStats] = useState<SessionStatsInfo | null>(null);
+  const [extensionStatuses, setExtensionStatuses] = useState<ExtensionStatusItem[]>([]);
   const [autoNameStatus, setAutoNameStatus] = useState<AutoNameStatus>({ kind: "idle" });
   const autoNameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeSessionIdRef = useRef<string | null>(selectedSession?.id ?? null);
   activeSessionIdRef.current = selectedSession?.id ?? null;
   const handleSessionStatsChange = useCallback((stats: SessionStatsInfo | null) => {
     setSessionStats(stats);
+  }, []);
+  const handleExtensionStatusesChange = useCallback((statuses: ExtensionStatusItem[]) => {
+    setExtensionStatuses(statuses);
   }, []);
   const [copiedSessionField, setCopiedSessionField] = useState<SessionCopyField | null>(null);
   const sessionCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1520,6 +1525,45 @@ export function AppShell() {
     );
   };
 
+  const renderRefreshButton = (mobile: boolean) => {
+    const covered = mobile && mobileToolbarMoreOpen;
+    return (
+      <button
+        type="button"
+        onClick={() => window.location.reload()}
+        disabled={covered}
+        tabIndex={covered ? -1 : undefined}
+        aria-hidden={covered ? true : undefined}
+        title={translate("sidebar.refresh")}
+        aria-label={translate("sidebar.refresh")}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
+          visibility: covered ? "hidden" : "visible",
+          pointerEvents: covered ? "none" : "auto",
+          background: "none", border: "none", borderLeft: "1px solid var(--border)",
+          color: "var(--text-muted)", cursor: "pointer", flexShrink: 0,
+          transition: "color 0.12s, background 0.12s",
+        }}
+        onMouseEnter={(event) => {
+          if (!covered) {
+            event.currentTarget.style.color = "var(--text)";
+            event.currentTarget.style.background = "var(--bg-hover)";
+          }
+        }}
+        onMouseLeave={(event) => {
+          event.currentTarget.style.color = "var(--text-muted)";
+          event.currentTarget.style.background = "none";
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5" />
+          <path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5" />
+        </svg>
+      </button>
+    );
+  };
+
   const renderMainFileToggle = (mobile: boolean) => {
     const covered = mobile && mobileToolbarMoreOpen;
     return (
@@ -1619,6 +1663,14 @@ export function AppShell() {
       }
       .mobile-session-stats {
         container-type: inline-size;
+      }
+      .session-info-extension-status .extension-status-shelf {
+        margin-top: 10px;
+        border-top-color: color-mix(in srgb, var(--border) 70%, transparent);
+      }
+      .session-info-extension-status .extension-status-line {
+        height: 30px;
+        padding: 0;
       }
       @container (max-width: 158px) {
         .mobile-session-stat-io {
@@ -1766,6 +1818,7 @@ export function AppShell() {
               </button>
               {renderSessionStatsButton(true)}
               {renderMainFileToggle(true)}
+              {renderRefreshButton(true)}
               {mobileToolbarMoreOpen && (
                 <div
                   id="mobile-toolbar-actions"
@@ -1800,7 +1853,12 @@ export function AppShell() {
               {renderSessionStatsButton(false)}
             </>
           )}
-          {!isMobile && renderMainFileToggle(false)}
+          {!isMobile && (
+            <>
+              {renderMainFileToggle(false)}
+              {renderRefreshButton(false)}
+            </>
+          )}
           {isMobile && (
             <BranchNavigator
               tree={branchTree}
@@ -2042,6 +2100,11 @@ export function AppShell() {
                             </div>
                           ))}
                         </div>
+                        {extensionStatuses.length > 0 && (
+                          <div className="session-info-extension-status">
+                            <ExtensionStatusBar statuses={extensionStatuses} />
+                          </div>
+                        )}
                       </div>
                     );
 
@@ -2096,6 +2159,7 @@ export function AppShell() {
               onSessionStatsChange={handleSessionStatsChange}
               onSessionStatsPanelOpen={openSessionStatsPanel}
               onContextUsageChange={handleContextUsageChange}
+              onExtensionStatusesChange={handleExtensionStatusesChange}
               onOpenFile={handleOpenLinkedFile}
               soundEnabled={soundEnabled}
               onSoundToggle={onSoundToggle}

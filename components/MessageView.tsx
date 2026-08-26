@@ -850,7 +850,7 @@ function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCal
     return <TextBlock block={block as TextContent} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} />;
   }
   if (block.type === "thinking") {
-    return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} sessionId={sessionId} entryId={entryId} blockIndex={blockIndex} />;
+    return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} sessionId={sessionId} entryId={entryId} blockIndex={blockIndex} />;
   }
   if (block.type === "toolCall") {
     const tc = block as ToolCallContent;
@@ -865,38 +865,46 @@ function TextBlock({ block, isStreaming, cwd, onOpenFile }: { block: TextContent
   return <SafeMarkdownBody isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile}>{block.text}</SafeMarkdownBody>;
 }
 
-function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
+function ThinkingBlock({ block, duration, isStreaming, cwd, onOpenFile, sessionId, entryId, blockIndex }: {
   block: ThinkingContent;
   duration?: number;
+  isStreaming?: boolean;
+  cwd?: string;
+  onOpenFile?: (filePath: string) => void;
   sessionId?: string;
   entryId?: string;
   blockIndex: number;
 }) {
   const { t } = useI18n();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const toggle = async () => {
-    const nextExpanded = !expanded;
-    setExpanded(nextExpanded);
-    if (!nextExpanded || !block.deferred || content !== null) return;
+  useEffect(() => {
+    if (!expanded || !block.deferred || content !== null || error !== null) return;
     if (!sessionId || !entryId) {
       setError(t("i18n.thinkingUnavailable"));
       return;
     }
 
+    let cancelled = false;
     setLoading(true);
-    setError(null);
-    try {
-      setContent(await loadThinkingContent(sessionId, entryId, blockIndex));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  };
+    void loadThinkingContent(sessionId, entryId, blockIndex)
+      .then((thinking) => {
+        if (!cancelled) setContent(thinking);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [block.deferred, blockIndex, content, entryId, error, expanded, sessionId, t]);
 
   return (
     <div
@@ -908,7 +916,11 @@ function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
       }}
     >
       <button
-        onClick={() => void toggle()}
+        onClick={() => {
+          if (!expanded) setError(null);
+          setExpanded((current) => !current);
+        }}
+        aria-expanded={expanded}
         style={{
           display: "flex",
           alignItems: "center",
@@ -935,12 +947,19 @@ function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
             color: error ? "#f87171" : "var(--text-muted)",
             fontSize: 12,
             lineHeight: 1.6,
-            whiteSpace: "pre-wrap",
             background: "var(--bg-panel)",
             borderTop: "1px solid var(--border)",
           }}
         >
-           {loading ? t("i18n.loadingThinking") : error ?? (block.deferred ? content : block.thinking)}
+          {loading || (block.deferred && content === null && error === null) ? (
+            <span style={{ whiteSpace: "pre-wrap" }}>{t("i18n.loadingThinking")}</span>
+          ) : error ? (
+            <span style={{ whiteSpace: "pre-wrap" }}>{error}</span>
+          ) : (
+            <SafeMarkdownBody isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile}>
+              {block.deferred ? content ?? "" : block.thinking}
+            </SafeMarkdownBody>
+          )}
         </div>
       )}
     </div>

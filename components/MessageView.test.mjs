@@ -85,6 +85,19 @@ test("renders partial assistant content before the provider error", () => {
   assert.match(html, /Error: Connection closed/);
 });
 
+test("expands thinking by default and renders its markdown as HTML", () => {
+  const html = renderMessage({
+    role: "assistant",
+    provider: "anthropic",
+    model: "claude-test",
+    content: [{ type: "thinking", thinking: "**Inspecting** `file.ts`" }],
+  });
+
+  assert.match(html, /aria-expanded="true"/);
+  assert.match(html, /<strong>Inspecting<\/strong>/);
+  assert.match(html, /<code class="markdown-inline-code">file\.ts<\/code>/);
+});
+
 test("renders a complete SDK skill expansion as a compact command", () => {
   const html = renderMessage({
     role: "user",
