@@ -88,7 +88,12 @@ the deployed build includes those changes.
    Set-Location C:\GitHub\pi-web
    npm install --registry=https://packagefeedproxy.microsoft.io/npm/
    npm run build
+   npm link
    ```
+
+   `npm link` exposes this fork's `pi-web` command globally. The command ensures
+   the `work-laptop-pi` Cloudflare tunnel is running, trusts the public hostname,
+   and starts the production server from this repository.
 
 ## Host
 
