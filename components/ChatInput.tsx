@@ -26,6 +26,11 @@ import { FolderIcon, getFileIcon } from "./FileIcons";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
 import type { ToolPreset } from "@/lib/tool-presets";
+import {
+  MAX_SPEECH_RECORDING_MS,
+  startPcmRecorder,
+  type PcmRecorder,
+} from "@/lib/speech-recorder";
 
 export interface AttachedImage {
   data: string;   // base64, no prefix
@@ -396,6 +401,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const [value, setValue] = useState(() => (draftKey ? getDraft(draftKey)?.value ?? "" : ""));
+  const [speechStatus, setSpeechStatus] = useState<"idle" | "starting" | "recording" | "transcribing">("idle");
+  const [speechError, setSpeechError] = useState<string | null>(null);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [modelFilter, setModelFilter] = useState("");
@@ -448,6 +455,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const valueRef = useRef(value);
   const attachedImagesRef = useRef(attachedImages);
   const pendingImageCountRef = useRef(0);
+  const speechRecorderRef = useRef<PcmRecorder | null>(null);
+  const speechSessionIdRef = useRef<string | null>(null);
+  const speechEventsRef = useRef<EventSource | null>(null);
+  const speechUploadRef = useRef<Promise<void>>(Promise.resolve());
+  const speechFlushTimerRef = useRef<number | null>(null);
+  const speechTimeoutRef = useRef<number | null>(null);
+  const speechGenerationRef = useRef(0);
+  const speechRangeRef = useRef<{ start: number; end: number } | null>(null);
   valueRef.current = value;
   attachedImagesRef.current = attachedImages;
 
@@ -808,6 +823,159 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     const pos = cursor ?? text.length;
     setAtQuery(extractAtQuery(text.slice(0, pos)));
   }, [cwd]);
+
+  const applySpeechTranscript = useCallback((transcript: string) => {
+    const text = transcript.trim();
+    const range = speechRangeRef.current;
+    if (!text || !range) return;
+    const current = valueRef.current;
+    const before = current.slice(0, range.start);
+    const after = current.slice(range.end);
+    const leadingSpace = before && !/\s$/.test(before) ? " " : "";
+    const trailingSpace = after && !/^\s/.test(after) ? " " : "";
+    const inserted = leadingSpace + text + trailingSpace;
+    const next = before + inserted + after;
+    const cursor = before.length + leadingSpace.length + text.length;
+    range.end = range.start + inserted.length;
+    valueRef.current = next;
+    setValue(next);
+    setHistoryMenuOpen(false);
+    updateAtQuery(next, cursor);
+    requestAnimationFrame(() => {
+      const input = textareaRef.current;
+      if (!input) return;
+      input.setSelectionRange(cursor, cursor);
+      input.style.height = "auto";
+      input.style.height = `${Math.min(input.scrollHeight, 200)}px`;
+    });
+  }, [updateAtQuery]);
+
+  const queueSpeechAudio = useCallback((sessionId: string, pcm: Uint8Array) => {
+    if (pcm.byteLength === 0) return;
+    speechUploadRef.current = speechUploadRef.current.then(async () => {
+      const response = await fetch(`/api/speech/session/${encodeURIComponent(sessionId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: pcm as BodyInit,
+      });
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({})) as { error?: string };
+        throw new Error(result.error || `Audio streaming failed (${response.status})`);
+      }
+    });
+  }, []);
+
+  const clearSpeechTimers = useCallback(() => {
+    if (speechFlushTimerRef.current !== null) window.clearInterval(speechFlushTimerRef.current);
+    if (speechTimeoutRef.current !== null) window.clearTimeout(speechTimeoutRef.current);
+    speechFlushTimerRef.current = null;
+    speechTimeoutRef.current = null;
+  }, []);
+
+  const finishSpeechRecording = useCallback(async () => {
+    const recorder = speechRecorderRef.current;
+    const sessionId = speechSessionIdRef.current;
+    if (!recorder || !sessionId) return;
+    speechRecorderRef.current = null;
+    clearSpeechTimers();
+    const generation = speechGenerationRef.current;
+    setSpeechStatus("transcribing");
+    setSpeechError(null);
+    try {
+      const recording = await recorder.stop();
+      queueSpeechAudio(sessionId, recording.pcm);
+      await speechUploadRef.current;
+      const response = await fetch(`/api/speech/session/${encodeURIComponent(sessionId)}`, { method: "PUT" });
+      const result = await response.json() as { text?: string; error?: string };
+      if (!response.ok) throw new Error(result.error || `Transcription failed (${response.status})`);
+      if (generation !== speechGenerationRef.current) return;
+      if (result.text) applySpeechTranscript(result.text);
+      else setSpeechError(t("chat.speechNotRecognized"));
+    } catch (error) {
+      if (generation === speechGenerationRef.current) {
+        setSpeechError(error instanceof Error ? error.message : t("chat.speechFailed"));
+      }
+      void fetch(`/api/speech/session/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+    } finally {
+      speechEventsRef.current?.close();
+      speechEventsRef.current = null;
+      speechSessionIdRef.current = null;
+      speechRangeRef.current = null;
+      if (generation === speechGenerationRef.current) setSpeechStatus("idle");
+    }
+  }, [applySpeechTranscript, clearSpeechTimers, queueSpeechAudio, t]);
+
+  const startSpeechRecording = useCallback(async () => {
+    if (speechStatus !== "idle") return;
+    const generation = ++speechGenerationRef.current;
+    setSpeechStatus("starting");
+    setSpeechError(null);
+    speechUploadRef.current = Promise.resolve();
+    const input = textareaRef.current;
+    const start = input?.selectionStart ?? valueRef.current.length;
+    speechRangeRef.current = { start, end: input?.selectionEnd ?? start };
+    try {
+      // Begin microphone capture first so speech is retained while Foundry loads
+      // the model and opens its streaming session on the first use.
+      const recorder = await startPcmRecorder();
+      speechRecorderRef.current = recorder;
+      const response = await fetch("/api/speech/session", { method: "POST" });
+      const result = await response.json() as { sessionId?: string; error?: string };
+      if (!response.ok || !result.sessionId) {
+        throw new Error(result.error || "Unable to start live transcription.");
+      }
+      if (generation !== speechGenerationRef.current) {
+        await recorder.cancel();
+        void fetch(`/api/speech/session/${encodeURIComponent(result.sessionId)}`, { method: "DELETE" });
+        return;
+      }
+
+      const sessionId = result.sessionId;
+      speechSessionIdRef.current = sessionId;
+      const events = new EventSource(`/api/speech/session/${encodeURIComponent(sessionId)}`);
+      events.addEventListener("partial", (event) => {
+        if (generation !== speechGenerationRef.current) return;
+        const data = JSON.parse((event as MessageEvent<string>).data) as { text?: string };
+        if (data.text) applySpeechTranscript(data.text);
+      });
+      events.addEventListener("error", (event) => {
+        if (!(event instanceof MessageEvent) || generation !== speechGenerationRef.current) return;
+        const data = JSON.parse(event.data) as { error?: string };
+        if (data.error) setSpeechError(data.error);
+      });
+      speechEventsRef.current = events;
+
+      speechFlushTimerRef.current = window.setInterval(() => {
+        const activeRecorder = speechRecorderRef.current;
+        const activeSessionId = speechSessionIdRef.current;
+        if (activeRecorder && activeSessionId) queueSpeechAudio(activeSessionId, activeRecorder.takePcm().pcm);
+      }, 250);
+      speechTimeoutRef.current = window.setTimeout(() => {
+        void finishSpeechRecording();
+      }, MAX_SPEECH_RECORDING_MS);
+      setSpeechStatus("recording");
+    } catch (error) {
+      clearSpeechTimers();
+      await speechRecorderRef.current?.cancel();
+      speechRecorderRef.current = null;
+      speechRangeRef.current = null;
+      if (generation === speechGenerationRef.current) {
+        setSpeechStatus("idle");
+        setSpeechError(error instanceof Error ? error.message : t("chat.speechFailed"));
+      }
+    }
+  }, [applySpeechTranscript, clearSpeechTimers, finishSpeechRecording, queueSpeechAudio, speechStatus, t]);
+
+  useEffect(() => () => {
+    speechGenerationRef.current += 1;
+    clearSpeechTimers();
+    speechEventsRef.current?.close();
+    if (speechSessionIdRef.current) {
+      void fetch(`/api/speech/session/${encodeURIComponent(speechSessionIdRef.current)}`, { method: "DELETE" });
+    }
+    void speechRecorderRef.current?.cancel();
+    speechRecorderRef.current = null;
+  }, [clearSpeechTimers]);
 
   const atQueryText = atQuery?.query ?? null;
   const atLocalMatches: FileIndexEntry[] = React.useMemo(() => (
@@ -1913,6 +2081,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 : t("chat.messagePlaceholder")
             }
             rows={1}
+            readOnly={speechStatus !== "idle"}
             style={{
               flex: 1,
               minWidth: 0,
@@ -1930,6 +2099,52 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               overflow: "auto",
             }}
           />
+
+          <button
+            type="button"
+            onClick={() => {
+              if (speechStatus === "recording") void finishSpeechRecording();
+              else if (speechStatus === "idle") void startSpeechRecording();
+            }}
+            disabled={speechStatus === "starting" || speechStatus === "transcribing"}
+            title={speechStatus === "recording"
+              ? t("chat.speechStop")
+              : speechStatus === "starting"
+                ? t("chat.speechStarting")
+                : speechStatus === "transcribing"
+                  ? t("chat.speechTranscribing")
+                  : t("chat.speechStart")}
+            aria-label={speechStatus === "recording" ? t("chat.speechStop") : t("chat.speechStart")}
+            aria-pressed={speechStatus === "recording"}
+            style={{
+              width: 34,
+              height: 34,
+              flexShrink: 0,
+              alignSelf: "flex-end",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 0,
+              border: "none",
+              borderRadius: 9,
+              background: speechStatus === "recording" ? "rgba(239,68,68,0.14)" : "transparent",
+              color: speechStatus === "recording" ? "#ef4444" : "var(--text-muted)",
+              cursor: speechStatus === "starting" || speechStatus === "transcribing" ? "wait" : "pointer",
+              opacity: speechStatus === "starting" || speechStatus === "transcribing" ? 0.65 : 1,
+              transition: "background 0.12s, color 0.12s",
+            }}
+          >
+            {speechStatus === "starting" || speechStatus === "transcribing" ? (
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <path d="M12 3a9 9 0 1 1-9 9" />
+              </svg>
+            ) : (
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="9" y="2" width="6" height="12" rx="3" />
+                <path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8" />
+              </svg>
+            )}
+          </button>
 
           {isStreaming ? (
             <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, alignSelf: "flex-end" }}>
@@ -2011,6 +2226,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           )}
           </div>
         </div>
+
+        {speechError && (
+          <div role="alert" className="text-xs px-2 py-1" style={{ color: "#ef4444", marginTop: 4 }}>
+            {speechError}
+          </div>
+        )}
 
         {/* Bash mode status label */}
         {bashMode && (
