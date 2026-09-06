@@ -61,6 +61,9 @@ type AutoNameStatus =
 
 const TOP_BAR_ICON_BUTTON_SIZE = 36;
 const LANGUAGE_MENU_WIDTH = 176;
+const MOBILE_EDGE_SWIPE_WIDTH = 28;
+const MOBILE_EDGE_SWIPE_OPEN_DISTANCE = 64;
+const MOBILE_EDGE_SWIPE_MAX_VERTICAL_DRIFT = 48;
 
 export function AppShell() {
   const router = useRouter();
@@ -111,6 +114,7 @@ export function AppShell() {
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [mobileToolbarMoreOpen, setMobileToolbarMoreOpen] = useState(false);
   const [mobileSidebarReady, setMobileSidebarReady] = useState(false);
+  const mobileEdgeSwipeRef = useRef<{ pointerId: number; startX: number; startY: number } | null>(null);
   const sidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
   const rightPanelWidthRef = useRef(RIGHT_PANEL_FALLBACK_WIDTH);
   const getResponsiveRightPanelWidth = useCallback(
@@ -294,6 +298,41 @@ export function AppShell() {
     }
     setSidebarOpen((open) => !open);
   }, [isMobile]);
+
+  const handleMobileEdgeSwipeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!event.isPrimary || event.pointerType === "mouse") return;
+    mobileEdgeSwipeRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, []);
+
+  const handleMobileEdgeSwipeMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const swipe = mobileEdgeSwipeRef.current;
+    if (!swipe || swipe.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - swipe.startX;
+    const deltaY = Math.abs(event.clientY - swipe.startY);
+    if (deltaX < 0 || (deltaY > MOBILE_EDGE_SWIPE_MAX_VERTICAL_DRIFT && deltaY > deltaX)) {
+      mobileEdgeSwipeRef.current = null;
+      return;
+    }
+    if (deltaX < MOBILE_EDGE_SWIPE_OPEN_DISTANCE || deltaX < deltaY * 1.25) return;
+
+    event.preventDefault();
+    mobileEdgeSwipeRef.current = null;
+    setRightPanelOpen(false);
+    setActiveTopPanel(null);
+    setMobileToolbarMoreOpen(false);
+    setSidebarOpen(true);
+  }, []);
+
+  const handleMobileEdgeSwipeEnd = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (mobileEdgeSwipeRef.current?.pointerId === event.pointerId) {
+      mobileEdgeSwipeRef.current = null;
+    }
+  }, []);
 
   const handleMobileToolbarMoreToggle = useCallback(() => {
     setSidebarOpen(false);
@@ -1716,6 +1755,27 @@ export function AppShell() {
           transition: "opacity 0.25s ease",
         }}
       />
+
+      {/* Capture a deliberate rightward swipe from the mobile viewport edge. */}
+      {isMobile && !sidebarOpen && (
+        <div
+          aria-hidden="true"
+          data-mobile-sidebar-swipe-edge="true"
+          onPointerDown={handleMobileEdgeSwipeStart}
+          onPointerMove={handleMobileEdgeSwipeMove}
+          onPointerUp={handleMobileEdgeSwipeEnd}
+          onPointerCancel={handleMobileEdgeSwipeEnd}
+          style={{
+            position: "fixed",
+            top: "calc(36px + env(safe-area-inset-top))",
+            bottom: 0,
+            left: 0,
+            width: `calc(${MOBILE_EDGE_SWIPE_WIDTH}px + env(safe-area-inset-left))`,
+            zIndex: 198,
+            touchAction: "pan-y",
+          }}
+        />
+      )}
 
       {/* Left sidebar */}
       <div
