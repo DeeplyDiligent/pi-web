@@ -255,6 +255,7 @@ type ModelsResponse = {
   thinkingLevelPins?: Record<string, string>;
   modelError?: string;
   modelScopeWarnings?: string[];
+  copilotCatalog?: { checkedAt?: number; warning?: string };
 };
 
 type SlashCommandsResponse = {
@@ -1519,12 +1520,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [isCompacting, loadSession]);
 
-  const loadModels = useCallback(async (signal?: AbortSignal) => {
+  const [copilotCatalog, setCopilotCatalog] = useState<ModelsResponse["copilotCatalog"]>();
+  const [modelsRefreshing, setModelsRefreshing] = useState(false);
+  const modelsRequestRef = useRef(0);
+  const modelsRefreshBusyRef = useRef(false);
+  const loadModels = useCallback(async (signal?: AbortSignal, force = false) => {
+    const requestId = ++modelsRequestRef.current;
     const modelCwd = newSessionCwd ?? session?.cwd ?? "";
     const modelsUrl = modelCwd ? `/api/models?cwd=${encodeURIComponent(modelCwd)}` : "/api/models";
-    const res = await fetch(modelsUrl, signal ? { signal } : undefined);
+    const res = await fetch(modelsUrl, { signal, method: force ? "POST" : "GET" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const d = await res.json() as ModelsResponse;
+    if (signal?.aborted || requestId !== modelsRequestRef.current) return;
+    setCopilotCatalog(d.copilotCatalog);
     setModelNames(d.models);
     setModelError(d.modelError ?? null);
     setModelScopeWarnings(d.modelScopeWarnings ?? []);
@@ -1546,6 +1554,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
     }
   }, [isNew, newSessionCwd, session?.cwd]);
+
+  const handleRefreshModels = useCallback(async () => {
+    if (modelsRefreshBusyRef.current) return;
+    modelsRefreshBusyRef.current = true;
+    setModelsRefreshing(true);
+    try {
+      await loadModels(undefined, true);
+    } catch {
+      setCopilotCatalog({ warning: "Could not refresh Copilot models. Your existing list is unchanged." });
+    } finally {
+      modelsRefreshBusyRef.current = false;
+      setModelsRefreshing(false);
+    }
+  }, [loadModels]);
 
   const handleBuiltinSlashCommand = useCallback(async (text: string): Promise<BuiltinSlashCommandResult> => {
     if (!text.startsWith("/")) return { handled: false };
@@ -1889,7 +1911,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     loadModels(controller.signal).catch((e) => {
       if (e instanceof DOMException && e.name === "AbortError") return;
     });
-    return () => controller.abort();
+    // Pick up background catalog refreshes without touching the selected model.
+    // No requests while the tab is hidden or a manual refresh is in progress.
+    const refresh = () => {
+      if (document.visibilityState !== "visible" || modelsRefreshBusyRef.current) return;
+      void loadModels(controller.signal).catch(() => undefined);
+    };
+    const timer = setInterval(refresh, 60_000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      controller.abort();
+      modelsRequestRef.current++;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+    };
   }, [loadModels, modelsRefreshKey]);
 
   useEffect(() => {
@@ -1939,6 +1974,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
     handleRecallQueue,
     handleBuiltinSlashCommand,
+    handleRefreshModels, modelsRefreshing, copilotCatalog,
     handleToolPresetChange, handleThinkingLevelChange, loadTools, loadSlashCommands, setActiveLeafId, setData, setMessages,
     scrollToBottom, scrollUserMsgToTop,
     dispatch, setAgentRunning, setForkingEntryId,

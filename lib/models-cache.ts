@@ -7,6 +7,7 @@ export interface ModelsData {
   /** `provider/modelId` → thinking level pinned by an `enabledModels` `:level` suffix. */
   thinkingLevelPins: Record<string, string>;
   modelError?: string;
+  copilotCatalog?: { checkedAt?: number; warning?: string };
   /** Warnings from resolving the `enabledModels` scope (e.g. a pattern matched nothing). */
   modelScopeWarnings?: string[];
 }

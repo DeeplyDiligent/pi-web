@@ -11,6 +11,8 @@ import {
 import { resolveVisibleModels, selectInitialModelScope } from "@/lib/model-scope";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
 import { projectTrustReloadOptions } from "@/lib/project-trust";
+import { syncCopilotModels } from "@/lib/copilot-discovery";
+import { invalidateModelsCache } from "@/lib/models-cache";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +27,7 @@ function compareModelEntries(
     || modelNameCollator.compare(a.id, b.id);
 }
 
-async function loadModels(cwd: string): Promise<ModelsData> {
+async function loadModels(cwd: string, forceCopilot = false): Promise<ModelsData> {
   const nameMap = new Map<string, string>();
   let modelList: { id: string; name: string; provider: string }[] = [];
   let defaultModel: { provider: string; modelId: string } | null = null;
@@ -42,6 +44,7 @@ async function loadModels(cwd: string): Promise<ModelsData> {
     agentDir,
     ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),
   });
+  const copilot = await syncCopilotModels(services.modelRuntime, { force: forceCopilot, background: !forceCopilot });
   const modelError = services.modelRuntime.getError();
   const settings: SettingsManager = services.settingsManager;
   // `enabledModels` supports globs and fuzzy patterns, so resolve it the same
@@ -82,6 +85,7 @@ async function loadModels(cwd: string): Promise<ModelsData> {
       thinkingLevels,
       thinkingLevelMaps,
       thinkingLevelPins,
+      copilotCatalog: copilot,
       ...(warnings.length > 0 ? { modelScopeWarnings: warnings } : {}),
     },
     modelError,
@@ -98,6 +102,15 @@ const EMPTY_MODELS: ModelsData = {
 };
 
 export async function GET(req: Request) {
+  return respondWithModels(req, false);
+}
+
+/** Explicit upstream refresh; never reloads a running agent or changes its model. */
+export async function POST(req: Request) {
+  return respondWithModels(req, true);
+}
+
+async function respondWithModels(req: Request, forceCopilot: boolean) {
   const requestedCwd = new URL(req.url).searchParams.get("cwd") || process.cwd();
   const cwd = resolve(requestedCwd);
 
@@ -116,6 +129,11 @@ export async function GET(req: Request) {
   }
 
   try {
+    if (forceCopilot) {
+      const data = await loadModels(cwd, true);
+      invalidateModelsCache();
+      return Response.json(data);
+    }
     return Response.json(await loadModelsWithCache(cwd, () => loadModels(cwd)));
   } catch {
     return Response.json(withSafeModelLoadFailure(EMPTY_MODELS));

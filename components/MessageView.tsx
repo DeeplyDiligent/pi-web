@@ -956,7 +956,7 @@ function ThinkingBlock({ block, duration, isStreaming, cwd, onOpenFile, sessionI
           ) : error ? (
             <span style={{ whiteSpace: "pre-wrap" }}>{error}</span>
           ) : (
-            <SafeMarkdownBody isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile}>
+            <SafeMarkdownBody className="markdown-thinking" isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile}>
               {block.deferred ? content ?? "" : block.thinking}
             </SafeMarkdownBody>
           )}

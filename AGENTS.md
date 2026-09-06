@@ -175,6 +175,12 @@ Newer pi emits `compaction_start` / `compaction_end`; older versions emitted `au
 - Skill toggling edits only the `disable-model-invocation` frontmatter key on the target `SKILL.md`; keep that surgical so user formatting survives.
 - `/api/skills/install` shells through `npx skills add ... --agent pi`; project installs run with the selected cwd.
 
+### Direct Copilot model discovery
+- `lib/copilot-discovery.ts` fetches the authenticated Copilot `/models` catalog, with a 15-minute account-partitioned cache under `~/.pi/agent/pi-web-cache/`. It does not edit user `models.json` or Pi's remote catalog store.
+- `lib/copilot-catalog.ts` maps advertised APIs/capabilities and required IDE headers. Live availability supersedes stale OAuth model IDs; custom model definitions/overrides still take precedence.
+- `POST /api/models?cwd=...` forces discovery; `GET` serves cached data and refreshes stale catalogs in the background. The picker exposes a refresh button, timestamp and warnings, including unknown pricing (zero cost placeholders do not mean free).
+- Install discovery in both selector and AgentSession runtimes, including `set_model` and reload. Respect project extensions, custom endpoints and `PI_OFFLINE`. See `docs/copilot-models.md`.
+
 ### Auth and model config
 - `ModelsConfig` combines models from `~/.pi/agent/models.json` with provider auth status from pi's `AuthStorage`/`ModelRegistry`.
 - Provider listing is capability-driven, never id-driven: `lib/provider-listing.ts` decides membership from `auth.apiKey.login` / `auth.oauth` plus the stored credential type, so dual-auth providers (anthropic and github-copilot today — which providers declare both changes between SDK releases, so never assume it from an id) appear exactly once and never fall through both lists (#309). `lib/provider-listing-runtime.ts` adapts `ModelRuntime` to those pure helpers.

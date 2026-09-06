@@ -52,7 +52,7 @@ export function encodePcm16(
   return bytes;
 }
 
-export async function startPcmRecorder(): Promise<PcmRecorder> {
+export async function startPcmRecorder(onLevel?: (level: number) => void): Promise<PcmRecorder> {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error("Microphone recording is not supported by this browser.");
   }
@@ -85,7 +85,13 @@ export async function startPcmRecorder(): Promise<PcmRecorder> {
 
   processor.onaudioprocess = (event) => {
     if (!active) return;
-    chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+    const samples = event.inputBuffer.getChannelData(0);
+    chunks.push(new Float32Array(samples));
+    if (onLevel) {
+      let sum = 0;
+      for (let index = 0; index < samples.length; index++) sum += samples[index] * samples[index];
+      onLevel(Math.min(1, Math.sqrt(sum / samples.length) * 4));
+    }
   };
   source.connect(processor);
   processor.connect(mutedOutput);
@@ -102,6 +108,7 @@ export async function startPcmRecorder(): Promise<PcmRecorder> {
     if (!active) return { pcm: new Uint8Array(), sampleRate: SPEECH_SAMPLE_RATE };
     active = false;
     processor.onaudioprocess = null;
+    onLevel?.(0);
     source.disconnect();
     processor.disconnect();
     mutedOutput.disconnect();

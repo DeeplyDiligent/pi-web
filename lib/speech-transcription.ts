@@ -16,7 +16,13 @@ const STREAM_CHUNK_BYTES = 32 * 1024;
 
 type FoundryLiveSession = ReturnType<ReturnType<IModel["createAudioClient"]>["createLiveTranscriptionSession"]>;
 
-type LiveSpeechEvent = { type: "partial" | "final" | "error"; text?: string; error?: string };
+type LiveSpeechEvent = {
+  type: "partial" | "final" | "error";
+  text?: string;
+  committed?: string;
+  partial?: string;
+  error?: string;
+};
 type LiveSpeechListener = (event: LiveSpeechEvent) => void;
 interface LiveSpeechSession {
   sdk: FoundryLiveSession;
@@ -134,6 +140,10 @@ async function getSpeechModel(): Promise<IModel> {
   return globals.__piSpeechModelPromise;
 }
 
+export async function warmSpeechModel(): Promise<void> {
+  await getSpeechModel();
+}
+
 function responseText(response: unknown): string {
   if (!response || typeof response !== "object") return "";
   const content = (response as { content?: unknown }).content;
@@ -190,7 +200,12 @@ export async function createLiveSpeechSession(): Promise<string> {
           session.tail += text;
         }
         session.transcript = (session.committed + session.tail).trim();
-        emitSpeechEvent(session, { type: "partial", text: session.transcript });
+        emitSpeechEvent(session, {
+          type: "partial",
+          text: session.transcript,
+          committed: session.committed.trim(),
+          partial: session.tail.trim(),
+        });
       }
     } catch (error) {
       const failure = error instanceof Error ? error : new Error("Live transcription failed.");

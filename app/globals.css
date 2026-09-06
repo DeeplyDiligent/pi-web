@@ -494,6 +494,18 @@ pre, code {
 .markdown-body .katex {
   font-size: 1.05em;
 }
+/* Thinking is secondary to the answer, in both saved and streaming blocks. */
+.markdown-body.markdown-thinking {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+.markdown-body.markdown-thinking :is(h1, h2, h3, h4, h5, h6, strong, em, .markdown-inline-code),
+.markdown-body.markdown-thinking li::marker {
+  color: inherit;
+}
+.markdown-body.markdown-thinking p { margin-bottom: 6px; }
+
 .markdown-user-message p {
   white-space: pre-wrap;
 }
@@ -1347,10 +1359,248 @@ span.token.table {
   }
 }
 
+/* Compact chat composer -------------------------------------------------- */
+.chat-composer-shell {
+  overflow: visible;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 16px;
+  background: var(--bg);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 28px -16px rgba(15, 23, 42, 0.18);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.chat-composer-shell:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent), 0 10px 28px -16px rgba(15, 23, 42, 0.2);
+}
+.chat-composer-shell[data-speech-status="recording"] {
+  border-color: color-mix(in srgb, #ef4444 52%, var(--border));
+}
+.chat-composer-input {
+  min-width: 0;
+  display: block;
+}
+.chat-composer-toolbar {
+  min-height: 42px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 48%, transparent);
+}
+.chat-composer-toolbar > :first-child {
+  overflow: hidden;
+}
+.chat-composer-mic,
+.chat-composer-send,
+.chat-composer-queue-action {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  transition: color 0.12s, background 0.12s, opacity 0.12s, transform 0.12s;
+}
+.chat-composer-mic {
+  width: 36px;
+  padding: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.chat-composer-mic:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.chat-composer-mic[data-active="true"] {
+  color: #ef4444;
+  background: color-mix(in srgb, #ef4444 13%, transparent);
+}
+.chat-composer-mic:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+.chat-composer-attachment:disabled {
+  cursor: not-allowed !important;
+  opacity: 0.4 !important;
+}
+.chat-composer-spinner {
+  animation: spin 0.8s linear infinite;
+  transform-origin: center;
+}
+.chat-composer-primary-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 2px;
+}
+.chat-composer-send {
+  width: 36px;
+  padding: 0;
+  color: #fff;
+  background: var(--accent);
+  cursor: pointer;
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.chat-composer-send:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+}
+.chat-composer-send:disabled {
+  color: var(--text-dim);
+  background: var(--bg-panel);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.chat-composer-queue-action {
+  gap: 5px;
+  padding: 0 10px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+.chat-composer-queue-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.chat-composer-steer {
+  color: #b48200;
+  background: rgba(234, 179, 8, 0.12);
+  border: 1px solid rgba(234, 179, 8, 0.3);
+}
+.chat-composer-followup {
+  color: #6366f1;
+  background: rgba(129, 140, 248, 0.12);
+  border: 1px solid rgba(129, 140, 248, 0.3);
+}
+.chat-composer-speech {
+  min-width: 0;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 7px;
+  padding: 4px 4px 4px 2px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 42%, transparent);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.chat-composer-speech-cancel {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+.chat-composer-speech-cancel:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.chat-composer-speech-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ef4444;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.chat-composer-speech-label {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.chat-composer-speech-scroll {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+}
+.chat-composer-speech-scroll::-webkit-scrollbar {
+  display: none;
+}
+.chat-composer-speech-leading-ellipsis {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
+  padding-right: 8px;
+  color: var(--text-dim);
+  background: linear-gradient(90deg, var(--bg) 0%, var(--bg) 58%, transparent 100%);
+  pointer-events: none;
+}
+.chat-composer-speech-committed {
+  color: var(--text);
+}
+.chat-composer-speech-partial {
+  color: var(--text-dim);
+  font-style: italic;
+}
+.chat-composer-speech-meter {
+  flex: 0 0 auto;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.chat-composer-speech-meter > span {
+  width: 2px;
+  height: 15px;
+  border-radius: 999px;
+  background: #ef4444;
+  transform-origin: center;
+  transition: transform 80ms linear;
+}
+.chat-composer-speech-time {
+  flex: 0 0 auto;
+  min-width: 32px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Mobile sidebar: slide in/out as overlay */
 @media (max-width: 640px) {
   .chat-stats-center {
     display: none !important;
+  }
+  .chat-composer-shell {
+    border-radius: 14px;
+  }
+  .chat-composer-toolbar {
+    min-height: 44px;
+  }
+  .chat-composer-mic,
+  .chat-composer-send,
+  .chat-composer-queue-action {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+  }
+  .chat-composer-speech {
+    margin: 0 5px;
+  }
+  .chat-composer-secondary-menu > * {
+    width: 100%;
+  }
+  .chat-composer-secondary-menu > * > button,
+  .chat-composer-secondary-menu > button {
+    width: 100% !important;
+    min-height: 40px;
+    justify-content: flex-start !important;
+    padding: 0 10px !important;
   }
   .sidebar-container {
     position: fixed !important;

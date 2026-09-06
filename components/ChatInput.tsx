@@ -60,6 +60,9 @@ interface Props {
   modelScopeWarnings?: string[];
   onModelChange?: (provider: string, modelId: string) => void;
   modelSwitching?: boolean;
+  onRefreshModels?: () => Promise<void>;
+  modelsRefreshing?: boolean;
+  copilotCatalog?: { checkedAt?: number; warning?: string };
   onCompact?: () => void;
   onAbortCompaction?: () => void;
   isCompacting?: boolean;
@@ -149,6 +152,11 @@ const THINKING_LEVEL_DESC_KEYS: Record<typeof THINKING_LEVELS[number], string> =
   auto: "chat.thinkingUseDefault", off: "chat.thinkingOff", minimal: "chat.thinkingMinimal", low: "chat.thinkingLow",
   medium: "chat.thinkingMedium", high: "chat.thinkingHigh", xhigh: "chat.thinkingXhigh", max: "chat.thinkingMax",
 };
+
+function formatSpeechElapsed(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+}
 
 function formatTokenCount(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
@@ -395,6 +403,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onBuiltinCommand,
   soundEnabled, onSoundToggle, onAudioUnlock,
   onPromptWithStreamingBehavior,
+  onRefreshModels, modelsRefreshing, copilotCatalog,
   draftKey,
   cwd,
 }: Props, ref) {
@@ -403,6 +412,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [value, setValue] = useState(() => (draftKey ? getDraft(draftKey)?.value ?? "" : ""));
   const [speechStatus, setSpeechStatus] = useState<"idle" | "starting" | "recording" | "transcribing">("idle");
   const [speechError, setSpeechError] = useState<string | null>(null);
+  const [speechCommitted, setSpeechCommitted] = useState("");
+  const [speechPreview, setSpeechPreview] = useState("");
+  const [speechLevel, setSpeechLevel] = useState(0);
+  const [speechElapsedSeconds, setSpeechElapsedSeconds] = useState(0);
+  const [speechPreviewClipped, setSpeechPreviewClipped] = useState(false);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [modelFilter, setModelFilter] = useState("");
@@ -460,9 +474,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const speechEventsRef = useRef<EventSource | null>(null);
   const speechUploadRef = useRef<Promise<void>>(Promise.resolve());
   const speechFlushTimerRef = useRef<number | null>(null);
+  const speechElapsedTimerRef = useRef<number | null>(null);
   const speechTimeoutRef = useRef<number | null>(null);
   const speechGenerationRef = useRef(0);
+  const speechPressStartedAtRef = useRef(0);
+  const speechWasActiveOnPressRef = useRef(false);
+  const speechStopRequestedRef = useRef(false);
   const speechRangeRef = useRef<{ start: number; end: number } | null>(null);
+  const speechPreviewRef = useRef<HTMLSpanElement>(null);
   valueRef.current = value;
   attachedImagesRef.current = attachedImages;
 
@@ -867,8 +886,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
   const clearSpeechTimers = useCallback(() => {
     if (speechFlushTimerRef.current !== null) window.clearInterval(speechFlushTimerRef.current);
+    if (speechElapsedTimerRef.current !== null) window.clearInterval(speechElapsedTimerRef.current);
     if (speechTimeoutRef.current !== null) window.clearTimeout(speechTimeoutRef.current);
     speechFlushTimerRef.current = null;
+    speechElapsedTimerRef.current = null;
     speechTimeoutRef.current = null;
   }, []);
 
@@ -901,7 +922,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       speechEventsRef.current = null;
       speechSessionIdRef.current = null;
       speechRangeRef.current = null;
-      if (generation === speechGenerationRef.current) setSpeechStatus("idle");
+      speechStopRequestedRef.current = false;
+      if (generation === speechGenerationRef.current) {
+        setSpeechStatus("idle");
+        setSpeechCommitted("");
+        setSpeechPreview("");
+        setSpeechLevel(0);
+        setSpeechElapsedSeconds(0);
+      }
     }
   }, [applySpeechTranscript, clearSpeechTimers, queueSpeechAudio, t]);
 
@@ -910,6 +938,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     const generation = ++speechGenerationRef.current;
     setSpeechStatus("starting");
     setSpeechError(null);
+    setSpeechCommitted("");
+    setSpeechPreview("");
+    setSpeechLevel(0);
+    setSpeechElapsedSeconds(0);
+    speechStopRequestedRef.current = false;
     speechUploadRef.current = Promise.resolve();
     const input = textareaRef.current;
     const start = input?.selectionStart ?? valueRef.current.length;
@@ -917,7 +950,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     try {
       // Begin microphone capture first so speech is retained while Foundry loads
       // the model and opens its streaming session on the first use.
-      const recorder = await startPcmRecorder();
+      const recorder = await startPcmRecorder(setSpeechLevel);
       speechRecorderRef.current = recorder;
       const response = await fetch("/api/speech/session", { method: "POST" });
       const result = await response.json() as { sessionId?: string; error?: string };
@@ -935,8 +968,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       const events = new EventSource(`/api/speech/session/${encodeURIComponent(sessionId)}`);
       events.addEventListener("partial", (event) => {
         if (generation !== speechGenerationRef.current) return;
-        const data = JSON.parse((event as MessageEvent<string>).data) as { text?: string };
-        if (data.text) applySpeechTranscript(data.text);
+        const data = JSON.parse((event as MessageEvent<string>).data) as {
+          text?: string;
+          committed?: string;
+          partial?: string;
+        };
+        setSpeechCommitted(data.committed ?? "");
+        setSpeechPreview(data.partial ?? data.text ?? "");
       });
       events.addEventListener("error", (event) => {
         if (!(event instanceof MessageEvent) || generation !== speechGenerationRef.current) return;
@@ -950,32 +988,115 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         const activeSessionId = speechSessionIdRef.current;
         if (activeRecorder && activeSessionId) queueSpeechAudio(activeSessionId, activeRecorder.takePcm().pcm);
       }, 250);
+      speechElapsedTimerRef.current = window.setInterval(() => {
+        setSpeechElapsedSeconds((seconds) => seconds + 1);
+      }, 1000);
       speechTimeoutRef.current = window.setTimeout(() => {
         void finishSpeechRecording();
       }, MAX_SPEECH_RECORDING_MS);
       setSpeechStatus("recording");
+      if (speechStopRequestedRef.current) void finishSpeechRecording();
     } catch (error) {
       clearSpeechTimers();
       await speechRecorderRef.current?.cancel();
       speechRecorderRef.current = null;
       speechRangeRef.current = null;
+      speechStopRequestedRef.current = false;
       if (generation === speechGenerationRef.current) {
         setSpeechStatus("idle");
+        setSpeechCommitted("");
+        setSpeechPreview("");
+        setSpeechLevel(0);
+        setSpeechElapsedSeconds(0);
         setSpeechError(error instanceof Error ? error.message : t("chat.speechFailed"));
       }
     }
   }, [applySpeechTranscript, clearSpeechTimers, finishSpeechRecording, queueSpeechAudio, speechStatus, t]);
 
-  useEffect(() => () => {
+  const cancelSpeechRecording = useCallback(() => {
     speechGenerationRef.current += 1;
     clearSpeechTimers();
     speechEventsRef.current?.close();
+    speechEventsRef.current = null;
     if (speechSessionIdRef.current) {
       void fetch(`/api/speech/session/${encodeURIComponent(speechSessionIdRef.current)}`, { method: "DELETE" });
     }
+    speechSessionIdRef.current = null;
     void speechRecorderRef.current?.cancel();
     speechRecorderRef.current = null;
+    speechRangeRef.current = null;
+    speechStopRequestedRef.current = false;
+    setSpeechStatus("idle");
+    setSpeechCommitted("");
+    setSpeechPreview("");
+    setSpeechLevel(0);
+    setSpeechElapsedSeconds(0);
   }, [clearSpeechTimers]);
+
+  useEffect(() => () => cancelSpeechRecording(), [cancelSpeechRecording]);
+
+  // Warm the local model after the composer settles so the first microphone
+  // press can begin streaming without paying the full model-load delay.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void fetch("/api/speech/warm", { method: "POST" }).catch(() => undefined);
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  // Desktop push-to-talk. Holding Ctrl/Cmd+Shift+Space records; releasing it
+  // finalizes. Escape always discards the active dictation.
+  useEffect(() => {
+    const keyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape" && speechStatus !== "idle") {
+        event.preventDefault();
+        cancelSpeechRecording();
+        return;
+      }
+      if (event.code !== "Space" || !event.shiftKey || (!event.ctrlKey && !event.metaKey) || event.repeat) return;
+      event.preventDefault();
+      if (speechStatus === "idle") void startSpeechRecording();
+    };
+    const keyUp = (event: globalThis.KeyboardEvent) => {
+      if (event.code !== "Space" || !event.shiftKey || (!event.ctrlKey && !event.metaKey)) return;
+      event.preventDefault();
+      if (speechStatus === "recording") void finishSpeechRecording();
+      else if (speechStatus === "starting") speechStopRequestedRef.current = true;
+    };
+    window.addEventListener("keydown", keyDown);
+    window.addEventListener("keyup", keyUp);
+    return () => {
+      window.removeEventListener("keydown", keyDown);
+      window.removeEventListener("keyup", keyUp);
+    };
+  }, [cancelSpeechRecording, finishSpeechRecording, speechStatus, startSpeechRecording]);
+
+  // Keep the newest recognized words visible. A normal text-overflow ellipsis
+  // preserves the beginning; live dictation needs the opposite behavior.
+  useLayoutEffect(() => {
+    if (speechStatus === "idle") {
+      setSpeechPreviewClipped(false);
+      return;
+    }
+    const preview = speechPreviewRef.current;
+    if (!preview) return;
+    let frame: number | null = null;
+    const revealLatest = () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        preview.scrollLeft = preview.scrollWidth;
+        setSpeechPreviewClipped(preview.scrollWidth > preview.clientWidth + 1);
+      });
+    };
+    revealLatest();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(revealLatest);
+    observer?.observe(preview);
+    return () => {
+      observer?.disconnect();
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [speechCommitted, speechPreview, speechStatus]);
 
   const atQueryText = atQuery?.query ?? null;
   const atLocalMatches: FileIndexEntry[] = React.useMemo(() => (
@@ -1523,6 +1644,33 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     if (!isMobile) setControlsMenuOpen(false);
   }, [isMobile]);
 
+  // Keep the model picker attached above its trigger when the mobile virtual
+  // keyboard changes the visual viewport. Measuring only on the opening click
+  // leaves the old bottom offset in place and can push the panel off-screen.
+  useLayoutEffect(() => {
+    if (!modelDropdownOpen) return;
+    let frame: number | null = null;
+    const update = () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        const rect = dropdownRef.current?.getBoundingClientRect();
+        if (rect) setModelDropdownRect({ top: rect.top, left: rect.left, width: rect.width });
+      });
+    };
+    update();
+    const viewport = window.visualViewport;
+    viewport?.addEventListener("resize", update);
+    viewport?.addEventListener("scroll", update);
+    window.addEventListener("resize", update);
+    return () => {
+      viewport?.removeEventListener("resize", update);
+      viewport?.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [modelDropdownOpen]);
+
 
 
   return (
@@ -1530,8 +1678,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       style={{
         flexShrink: 0,
         background: "transparent",
-        padding: "0 16px 8px",
-        paddingRight: isMobile ? 16 : 52, // desktop: 16px base + 36px for ChatMinimap alignment
+        padding: isMobile ? "0 8px 5px" : "0 16px 8px",
+        paddingRight: isMobile ? 8 : 52, // desktop: 16px base + 36px for ChatMinimap alignment
       }}
     >
       {/* Hidden file input */}
@@ -1547,7 +1695,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           e.target.value = "";
         }}
       />
-      <div style={{ maxWidth: 820, margin: "0 auto" }}>
+      <div style={{ maxWidth: 880, margin: "0 auto" }}>
         <ModelErrorBanner error={modelError} />
         <ModelScopeWarningBanner warnings={modelScopeWarnings} />
         {/* Queued steering / follow-up messages (delivered by pi on upcoming turns) */}
@@ -1696,7 +1844,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           </div>
         )}
 
-        {/* Main input */}
+        {/* Compact composer: text and controls share one surface. */}
+        <div className="chat-composer-shell" data-speech-status={speechStatus}>
         <div style={{ position: "relative", minWidth: 0 }}>
           {historyMenuOpen && inputHistory.length > 0 && (
             <div
@@ -2033,22 +2182,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </div>
             );
           })()}
-          <div
-            style={{
-              minWidth: 0,
-              display: "flex",
-              gap: 8,
-              alignItems: "center",
-              background: "var(--bg)",
-              border: `1px solid ${bashMode ? "var(--tool-bg)" : isStreaming && (onSteer || onFollowUp)
-                ? "rgba(234,179,8,0.4)"
-                : "color-mix(in srgb, var(--border) 70%, transparent)"}`,
-              borderRadius: 14,
-              padding: "10px 10px 10px 14px",
-              boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 8px 24px -12px rgba(15,23,42,0.10)",
-              transition: "border-color 0.15s, background 0.15s, box-shadow 0.15s",
-            } as React.CSSProperties}
-          >
+          <div className="chat-composer-input">
           <textarea
             ref={textareaRef}
             value={value}
@@ -2083,9 +2217,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             rows={1}
             readOnly={speechStatus !== "idle"}
             style={{
-              flex: 1,
+              display: "block",
               minWidth: 0,
               width: "100%",
+              boxSizing: "border-box",
+              padding: isMobile ? "9px 11px 5px" : "11px 13px 6px",
               background: "none",
               border: "none",
               outline: "none",
@@ -2094,8 +2230,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               fontSize: 14,
               lineHeight: 1.6,
               fontFamily: "inherit",
-              minHeight: 24,
-              maxHeight: 200,
+              minHeight: isMobile ? 42 : 44,
+              maxHeight: isMobile ? "min(40dvh, 320px)" : 240,
               overflow: "auto",
             }}
           />
@@ -2117,11 +2253,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             aria-label={speechStatus === "recording" ? t("chat.speechStop") : t("chat.speechStart")}
             aria-pressed={speechStatus === "recording"}
             style={{
+              display: "none",
               width: 34,
               height: 34,
               flexShrink: 0,
               alignSelf: "flex-end",
-              display: "flex",
               alignItems: "center",
               justifyContent: "center",
               padding: 0,
@@ -2147,7 +2283,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           </button>
 
           {isStreaming ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, alignSelf: "flex-end" }}>
+            <div style={{ display: "none", alignItems: "center", gap: 6, flexShrink: 0, alignSelf: "flex-end" }}>
               {onSteer && (
                 <button
                   onClick={() => sendQueued("steer")}
@@ -2201,9 +2337,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               onClick={handleSend}
               disabled={!value.trim() && !attachedImages.length}
               style={{
+                display: "none",
                 flexShrink: 0,
                 alignSelf: "flex-end",
-                display: "flex", alignItems: "center", gap: 6,
+                alignItems: "center", gap: 6,
                 padding: "7px 14px",
                 background: (value.trim() || attachedImages.length) ? "var(--accent)" : "var(--bg-panel)",
                 border: "none",
@@ -2227,8 +2364,41 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           </div>
         </div>
 
+        {speechStatus !== "idle" && (
+          <div className="chat-composer-speech" role="status" aria-live="polite">
+            <button
+              type="button"
+              onClick={cancelSpeechRecording}
+              className="chat-composer-speech-cancel"
+              title={t("chat.speechCancel")}
+              aria-label={t("chat.speechCancel")}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+            <span className="chat-composer-speech-dot" />
+            <span className="chat-composer-speech-label">
+              {speechPreviewClipped && <span className="chat-composer-speech-leading-ellipsis" aria-hidden="true">…</span>}
+              <span ref={speechPreviewRef} className="chat-composer-speech-scroll">
+                {speechStatus === "starting" ? t("chat.speechStarting")
+                  : speechStatus === "transcribing" ? t("chat.speechTranscribing")
+                    : speechCommitted || speechPreview ? (
+                      <><span className="chat-composer-speech-committed">{speechCommitted}</span>{speechCommitted && speechPreview ? " " : ""}<span className="chat-composer-speech-partial">{speechPreview}</span></>
+                    ) : t("chat.speechListening")}
+              </span>
+            </span>
+            <span className="chat-composer-speech-meter" aria-hidden="true">
+              {[0.45, 0.7, 1, 0.65, 0.4].map((weight, index) => (
+                <span key={index} style={{ transform: `scaleY(${Math.max(0.18, speechLevel * weight)})` }} />
+              ))}
+            </span>
+            <span className="chat-composer-speech-time">{formatSpeechElapsed(speechElapsedSeconds)}</span>
+          </div>
+        )}
+
         {speechError && (
-          <div role="alert" className="text-xs px-2 py-1" style={{ color: "#ef4444", marginTop: 4 }}>
+          <div role="alert" className="text-xs px-2 py-1" style={{ color: "#ef4444", marginTop: 2 }}>
             {speechError}
           </div>
         )}
@@ -2240,19 +2410,22 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           </div>
         )}
 
-        {/* Bottom bar: left | center (context) | right */}
-        <div style={{
-          marginTop: 8,
-          display: isMobile ? "grid" : "flex",
-          gridTemplateColumns: isMobile ? "minmax(0, 1fr) auto" : undefined,
+        {/* One compact toolbar: primary actions stay visible; secondary controls collapse on mobile. */}
+        <div className="chat-composer-toolbar" style={{
+          marginTop: 0,
+          display: "flex",
           alignItems: "center",
-          gap: 6,
+          gap: isMobile ? 2 : 4,
+          padding: isMobile ? "3px 4px 4px" : "4px 6px 5px",
+          minWidth: 0,
         }}>
 
           {/* LEFT: attach + model selector (idle) or steer/followup toggle (streaming) */}
-          <div style={{ flex: isMobile ? "1 1 auto" : "0 0 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 2 }}>
+          <div style={{ flex: isMobile ? "1 1 0" : "0 0 auto", minWidth: 0, overflow: "hidden", display: "flex", alignItems: "center", gap: 2 }}>
             <button
+              className="chat-composer-attachment"
               onClick={() => fileInputRef.current?.click()}
+              disabled={speechStatus !== "idle"}
              title={t("chat.attachImage")}
               style={{
                 flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
@@ -2279,9 +2452,60 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 <polyline points="21 15 16 10 5 21" />
               </svg>
             </button>
+            <button
+              type="button"
+              className="chat-composer-mic"
+              data-active={speechStatus === "recording" || undefined}
+              disabled={speechStatus === "transcribing"}
+              aria-busy={speechStatus === "starting" || speechStatus === "transcribing"}
+              title={speechStatus === "recording"
+                ? t("chat.speechStop")
+                : speechStatus === "starting"
+                  ? t("chat.speechStarting")
+                  : speechStatus === "transcribing"
+                    ? t("chat.speechTranscribing")
+                    : `${t("chat.speechStart")} · Ctrl+Shift+Space`}
+              aria-label={speechStatus === "recording" ? t("chat.speechStop") : t("chat.speechStart")}
+              aria-pressed={speechStatus === "recording"}
+              onPointerDown={(event) => {
+                speechPressStartedAtRef.current = performance.now();
+                speechWasActiveOnPressRef.current = speechStatus !== "idle";
+                event.currentTarget.setPointerCapture(event.pointerId);
+                if (speechStatus === "idle") void startSpeechRecording();
+              }}
+              onPointerUp={() => {
+                const held = performance.now() - speechPressStartedAtRef.current >= 350;
+                if (speechWasActiveOnPressRef.current || held) {
+                  if (speechStatus === "recording") void finishSpeechRecording();
+                  else speechStopRequestedRef.current = true;
+                }
+              }}
+              onClick={(event) => {
+                // Keyboard activation has detail 0; pointer activation is handled
+                // above so a short tap starts toggle-mode recording.
+                if (event.detail !== 0) return;
+                if (speechStatus === "recording") void finishSpeechRecording();
+                else if (speechStatus === "idle") void startSpeechRecording();
+              }}
+            >
+              {speechStatus === "starting" || speechStatus === "transcribing" ? (
+                <svg className="chat-composer-spinner" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                  <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                </svg>
+              ) : speechStatus === "recording" ? (
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+                  <rect x="3" y="3" width="8" height="8" rx="1.5" />
+                </svg>
+              ) : (
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="9" y="2" width="6" height="12" rx="3" />
+                  <path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8" />
+                </svg>
+              )}
+            </button>
             {/* Model selector — visible always, disabled while the session or switch is busy */}
             {(modelOptions.length > 0 || currentName || modelError) && onModelChange && (
-                <div ref={dropdownRef} style={{ position: "relative", flex: isMobile ? "1 1 auto" : undefined, minWidth: 0 }}>
+                <div ref={dropdownRef} style={{ position: "relative", flex: isMobile ? "1 1 0" : undefined, minWidth: 0, overflow: "hidden" }}>
                   <button
                     onClick={(e) => {
                       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -2291,7 +2515,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                         return !open;
                       });
                     }}
-                    disabled={isStreaming || modelSwitching}
+                    disabled={isStreaming || modelSwitching || speechStatus !== "idle"}
                     aria-busy={modelSwitching || undefined}
                     style={{
                       display: "flex", alignItems: "center", gap: 6,
@@ -2305,13 +2529,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       border: "none",
                       borderRadius: 9,
                       color: "var(--text-muted)",
-                      cursor: isStreaming || modelSwitching ? "not-allowed" : "pointer",
+                      cursor: isStreaming || modelSwitching || speechStatus !== "idle" ? "not-allowed" : "pointer",
                       fontSize: 12,
-                      opacity: isStreaming ? 0.5 : 1,
+                      opacity: isStreaming || speechStatus !== "idle" ? 0.5 : 1,
                       transition: "background 0.12s, color 0.12s",
                     }}
                     onMouseEnter={(e) => {
-                      if (isStreaming || modelSwitching) return;
+                      if (isStreaming || modelSwitching || speechStatus !== "idle") return;
                       e.currentTarget.style.background = "var(--bg-hover)";
                       e.currentTarget.style.color = "var(--text)";
                     }}
@@ -2340,9 +2564,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     </span>
                   </button>
                   {modelDropdownOpen && modelDropdownRect && (() => {
-                    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-                    const bottom = viewportHeight - modelDropdownRect.top + 6;
-                    const maxH = Math.max(120, Math.min(modelDropdownRect.top - 8, viewportHeight * 0.6));
+                    const viewport = window.visualViewport;
+                    const viewportTop = viewport?.offsetTop ?? 0;
+                    const viewportHeight = viewport?.height ?? window.innerHeight;
+                    const maxH = Math.max(96, Math.min(
+                      modelDropdownRect.top - viewportTop - 14,
+                      viewportHeight * (isMobile ? 0.72 : 0.6),
+                    ));
                     // On mobile, pin to a small left margin and cap width to the
                     // viewport so long model names never push the panel off-screen.
                     const panelPos: React.CSSProperties = isMobile
@@ -2351,12 +2579,27 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     return (
                       <div ref={modelDropdownPanelRef} style={{
                       position: "fixed",
-                      bottom,
+                      top: modelDropdownRect.top - 6,
+                      transform: "translateY(-100%)",
                       ...panelPos,
                       zIndex: 500, background: "var(--bg)", border: "1px solid var(--border)",
                       borderRadius: 8, boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
                       overflow: "hidden", maxHeight: maxH, display: "flex", flexDirection: "column",
                       }}>
+                      {onRefreshModels && (
+                        <div style={{ padding: "6px 8px", flexShrink: 0, borderBottom: "1px solid var(--border)" }}>
+                          <button type="button" onClick={() => { void onRefreshModels(); }} disabled={modelsRefreshing}
+                            aria-busy={modelsRefreshing || undefined}
+                            style={{ display: "flex", alignItems: "center", gap: 7, minHeight: 40, padding: "4px 8px", border: 0, borderRadius: 6, background: "var(--bg-hover)", color: "var(--text-muted)", cursor: modelsRefreshing ? "wait" : "pointer", fontSize: 12, width: "100%" }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" style={{ flexShrink: 0, animation: modelsRefreshing ? "spin 0.8s linear infinite" : undefined }}>
+                              <path d="M20 7a9 9 0 1 0 1 8M20 3v5h-5" />
+                            </svg>
+                            {t(modelsRefreshing ? "chat.refreshingCopilot" : "chat.refreshCopilot")}
+                          </button>
+                          {copilotCatalog?.checkedAt && <div style={{ fontSize: 10, color: "var(--text-dim)", padding: "4px 8px 0" }}>{t("chat.copilotLastChecked", { time: new Date(copilotCatalog.checkedAt).toLocaleTimeString() })}</div>}
+                          {copilotCatalog?.warning && <div role="status" style={{ fontSize: 11, color: "var(--text-muted)", padding: "4px 8px", maxHeight: 64, overflowY: "auto", whiteSpace: "normal", overflowWrap: "anywhere" }}>{copilotCatalog.warning}</div>}
+                        </div>
+                      )}
                       {showModelFilter && (
                         <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
                           <input
@@ -2370,7 +2613,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                             }}
                             placeholder={t("chat.filterModels")}
                             aria-label={t("chat.filterModels")}
-                            autoFocus
+                            autoFocus={!isMobile}
                             autoComplete="off"
                             spellCheck={false}
                             style={{
@@ -2461,6 +2704,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             {isMobile && (
               <button
                 type="button"
+                disabled={speechStatus !== "idle"}
                  title={controlsMenuOpen ? undefined : t("chat.moreControls")}
                  aria-label={t("chat.moreControls")}
                 aria-expanded={controlsMenuOpen}
@@ -2475,9 +2719,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  width: "100%",
-                  height: 32,
-                  padding: "8px 10px",
+                  width: 36,
+                  height: 36,
+                  padding: 0,
                   background: "none",
                   border: "none",
                   borderRadius: 9,
@@ -2500,21 +2744,25 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   e.currentTarget.style.color = "var(--text-muted)";
                 }}
               >
-                {t("chat.moreControls")}
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" />
+                </svg>
               </button>
             )}
-            <div style={{
+            <div className="chat-composer-secondary-menu" style={{
               display: isMobile ? (controlsMenuOpen ? "flex" : "none") : "flex",
               alignItems: "center",
               gap: isMobile ? 1 : 2,
               ...(isMobile ? {
                 position: "absolute",
                 right: 0,
-                bottom: 0,
+                bottom: "calc(100% + 8px)",
                 zIndex: 60,
-                padding: 1,
-                width: "max-content",
-                maxWidth: "calc(100vw - 32px)",
+                padding: 6,
+                width: "min(260px, calc(100vw - 24px))",
+                maxWidth: "calc(100vw - 24px)",
+                flexDirection: "column",
+                alignItems: "stretch",
                 flexWrap: "nowrap",
                 justifyContent: "flex-end",
                 border: "1px solid color-mix(in srgb, var(--border) 72%, transparent)",
@@ -2852,6 +3100,56 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             </div>
           </div>
 
+          <div className="chat-composer-primary-actions">
+            {isStreaming ? (
+              <>
+                {onSteer && (
+                  <button
+                    type="button"
+                    className="chat-composer-queue-action chat-composer-steer"
+                    onClick={() => sendQueued("steer")}
+                    disabled={!canQueueStreamingMessage}
+                    title={t("chat.steer")}
+                    aria-label={t("chat.steer")}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M6 2 10 6 6 10" /><path d="M2 6h8" />
+                    </svg>
+                    {!isMobile && <span>{t("chat.steer")}</span>}
+                  </button>
+                )}
+                {onFollowUp && (
+                  <button
+                    type="button"
+                    className="chat-composer-queue-action chat-composer-followup"
+                    onClick={() => sendQueued("followup")}
+                    disabled={!canQueueStreamingMessage}
+                    title={t("chat.followUp")}
+                    aria-label={t("chat.followUp")}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M6 2v7M3 5l3-3 3 3" /><path d="M3 10h6" />
+                    </svg>
+                    {!isMobile && <span>{t("chat.followUp")}</span>}
+                  </button>
+                )}
+              </>
+            ) : (
+              <button
+                type="button"
+                className="chat-composer-send"
+                onClick={handleSend}
+                disabled={(!value.trim() && !attachedImages.length) || speechStatus !== "idle"}
+                title={t("chat.send")}
+                aria-label={t("chat.send")}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 19V5" /><path d="m6 11 6-6 6 6" />
+                </svg>
+              </button>
+            )}
+          </div>
+        </div>
         </div>
       </div>
     </div>

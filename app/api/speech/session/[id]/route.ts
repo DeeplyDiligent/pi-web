@@ -64,7 +64,7 @@ export async function GET(request: Request, context: RouteContext) {
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      const send = (event: { type: string; text?: string; error?: string }) => {
+      const send = (event: { type: string; text?: string; committed?: string; partial?: string; error?: string }) => {
         controller.enqueue(encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`));
         if (event.type === "final" || event.type === "error") {
           unsubscribe();
