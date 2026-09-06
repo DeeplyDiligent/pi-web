@@ -65,7 +65,7 @@ const MOBILE_EDGE_SWIPE_WIDTH = 28;
 const MOBILE_EDGE_SWIPE_OPEN_DISTANCE = 64;
 const MOBILE_EDGE_SWIPE_MAX_VERTICAL_DRIFT = 48;
 
-export function AppShell() {
+export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [initialNavigation] = useState(() => getInitialNavigation(searchParams));
@@ -1008,6 +1008,18 @@ export function AppShell() {
                 <path d="M15 7V2" />
                 <path d="M6 13V8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v5a6 6 0 0 1-12 0Z" />
                 <path d="M12 19v3" />
+              </svg>
+            ),
+          },
+          {
+            label: translate("common.signOut"),
+            onClick: () => onSignOut?.(),
+            disabled: !onSignOut,
+            icon: (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10 17l5-5-5-5" />
+                <path d="M15 12H3" />
+                <path d="M21 19V5a2 2 0 0 0-2-2h-6" />
               </svg>
             ),
           },
