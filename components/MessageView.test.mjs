@@ -28,6 +28,49 @@ function renderMessage(message, props = {}) {
   );
 }
 
+test("message usage footer shows only the dollar cost", () => {
+  const message = {
+    role: "assistant",
+    content: [{ type: "text", text: "Done." }],
+    usage: { input: 3, output: 1141, cacheRead: 134712, cacheWrite: 1783, cost: { total: 0.2141 } },
+  };
+  const html = renderMessage(message);
+  assert.match(html, /\$0\.2141/);
+  assert.doesNotMatch(html, /3 in|1,141 out|134,712|1,783|cache R|cache W| · /);
+  assert.doesNotMatch(renderMessage(message, { isStreaming: true }), /\$0\.2141/);
+});
+
+test("usage footer distinguishes zero cost from missing or invalid pricing", () => {
+  for (const total of [0, undefined, NaN, Infinity]) {
+    const html = renderMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "Done." }],
+      usage: { input: 3, output: 1141, cost: { total } },
+    });
+    if (total === 0) assert.match(html, /\$0\.0000/);
+    else assert.doesNotMatch(html, /\$|NaN|Infinity/);
+    assert.doesNotMatch(html, /3 in|1,141 out/);
+  }
+});
+
+test("Fork is at the assistant response footer, not on the user message", () => {
+  const props = { entryId: "entry", onFork() {}, onEdit() {} };
+  const user = renderMessage({ role: "user", content: "prompt" }, props);
+  const assistant = renderMessage({ role: "assistant", content: [{ type: "text", text: "response" }] }, props);
+  assert.doesNotMatch(user, /aria-label="Fork"/);
+  assert.match(user, /aria-label="Edit from here"/);
+  assert.match(assistant, /aria-label="Fork"/);
+  assert.ok(assistant.indexOf("response") < assistant.indexOf('aria-label="Fork"'));
+  assert.doesNotMatch(renderMessage({ role: "assistant", content: [] }, { ...props, isStreaming: true }), /aria-label="Fork"/);
+});
+
+test("the optimistic latest user message can show Edit without a persisted entry id", () => {
+  const html = renderMessage({ role: "user", content: "currently running" }, { onEdit() {}, editing: true });
+  assert.match(html, /aria-label="Edit from here"/);
+  assert.match(html, /disabled=""/);
+  assert.match(html, /Stopping/);
+});
+
 test("updates a reused message when its written files change", () => {
   const props = { message: { role: "assistant", content: [] } };
   assert.equal(MessageView.compare(props, props), true);

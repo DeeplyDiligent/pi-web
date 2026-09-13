@@ -11,6 +11,7 @@ import { TabBar, type Tab } from "./TabBar";
 import { openFileTab, saveFileViewerState } from "./file-tab-state";
 import { SettingsPanel, SettingsSectionIcon } from "./SettingsPanel";
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
+import { NewThreadDialog, type NewThreadWorkspace } from "./NewThreadDialog";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { BranchNavigator, hasSessionBranches } from "./BranchNavigator";
 import { SystemPromptPanel } from "./SystemPromptPanel";
@@ -151,6 +152,7 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
   // The temporary id distinguishes consecutive fresh composers in one cwd.
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
   const [newSessionDraftId, setNewSessionDraftId] = useState("initial");
+  const [newThreadDialogOpen, setNewThreadDialogOpen] = useState(false);
   const activeNewSessionDraftKeyRef = useRef<string | null>(null);
   const [initialCwdStatus, setInitialCwdStatus] = useState<"idle" | "validating" | "ready" | "error">(
     () => initialNavigation.requestedCwd ? "validating" : "idle",
@@ -813,9 +815,14 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
     router.replace(typeof window !== "undefined" ? window.location.pathname : "/", { scroll: false });
   }, [invalidateWorkspaceRestore, router, isMobile]);
 
+  const requestNewSession = useCallback(() => {
+    setMobileToolbarMoreOpen(false);
+    setNewThreadDialogOpen(true);
+  }, []);
+
   // Global keyboard shortcuts (handles Esc, Ctrl+Alt+N etc.)
   useGlobalKeyboardShortcuts({
-    onNewSession: (cwd: string) => handleNewSession(`kb-${Date.now()}`, cwd),
+    onNewSession: requestNewSession,
     activeCwd,
   });
 
@@ -1174,7 +1181,7 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
       <SessionSidebar
         selectedSessionId={selectedSession?.id ?? null}
         onSelectSession={handleSelectSession}
-        onNewSession={handleNewSession}
+        onNewSession={requestNewSession}
         initialSessionId={initialSessionId}
         skipInitialProjectSelection={initialNavigation.requestedCwd !== null}
         onInitialRestoreDone={handleInitialRestoreDone}
@@ -1855,6 +1862,30 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
     );
   };
 
+  const handleNewThreadWorkspace = (workspace: NewThreadWorkspace) => {
+    // Start a fresh composer, not the chosen workspace's remembered thread.
+    // Sync identity before the sidebar reports its new cwd back to the shell.
+    const previousDraftKey = activeNewSessionDraftKeyRef.current;
+    const previousCwd = newSessionCwd ?? activeCwd;
+    if (previousDraftKey && previousCwd) {
+      rekeyDraft(previousDraftKey, parkedNewSessionDraftKey(previousCwd));
+    }
+    if (activeProjectKeyRef.current !== workspace.projectKey) {
+      setFileTabs([]);
+      if (!activeFileTabId || activeFileTabId.startsWith("file:")) {
+        setActiveFileTabId(null);
+        setRightPanelOpen(false);
+      }
+    }
+    activeProjectKeyRef.current = workspace.projectKey;
+    setActiveCwd(workspace.cwd);
+    const id = typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `workspace-${Date.now()}`;
+    handleNewSession(id, workspace.cwd);
+    setNewThreadDialogOpen(false);
+  };
+
   const renderRefreshButton = (mobile: boolean) => {
     const covered = mobile && isNarrowMobile && mobileToolbarMoreOpen;
     return (
@@ -1889,6 +1920,49 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5" />
           <path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5" />
+        </svg>
+      </button>
+    );
+  };
+
+  const renderNewThreadButton = (mobile: boolean) => {
+    const covered = mobile && isNarrowMobile && mobileToolbarMoreOpen;
+    const disabled = covered;
+    return (
+      <button
+        type="button"
+        onClick={requestNewSession}
+        aria-haspopup="dialog"
+        aria-expanded={newThreadDialogOpen}
+        disabled={disabled}
+        tabIndex={covered ? -1 : undefined}
+        aria-hidden={covered ? true : undefined}
+        title={translate("chat.newThread")}
+        aria-label={translate("chat.newThread")}
+        data-toolbar-new-thread="true"
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
+          visibility: covered ? "hidden" : "visible",
+          pointerEvents: covered ? "none" : "auto",
+          background: "none", border: "none", borderLeft: "1px solid var(--border)",
+          color: "var(--text-muted)", cursor: disabled ? "not-allowed" : "pointer",
+          flexShrink: 0,
+          transition: "color 0.12s, background 0.12s",
+        }}
+        onMouseEnter={(event) => {
+          if (!disabled) {
+            event.currentTarget.style.color = "var(--text)";
+            event.currentTarget.style.background = "var(--bg-hover)";
+          }
+        }}
+        onMouseLeave={(event) => {
+          event.currentTarget.style.color = "var(--text-muted)";
+          event.currentTarget.style.background = "none";
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+          <path d="M12 5v14M5 12h14" />
         </svg>
       </button>
     );
@@ -1931,6 +2005,14 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
 
   return (
     <>
+    {newThreadDialogOpen && (
+      <NewThreadDialog
+        sessions={sessionsWithSelection}
+        currentCwd={activeCwd}
+        onCancel={() => setNewThreadDialogOpen(false)}
+        onSelect={handleNewThreadWorkspace}
+      />
+    )}
     <style>{`
       @keyframes session-info-pop {
         0% {
@@ -2172,6 +2254,7 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
               {!isNarrowMobile && renderChatToolbarActions(true)}
               {renderSessionStatsButton(true)}
               {renderMainFileToggle(true)}
+              {renderNewThreadButton(true)}
               {renderRefreshButton(true)}
               {isNarrowMobile && mobileToolbarMoreOpen && (
                 <div
@@ -2210,6 +2293,7 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
           {!isMobile && (
             <>
               {renderMainFileToggle(false)}
+              {renderNewThreadButton(false)}
               {renderRefreshButton(false)}
             </>
           )}

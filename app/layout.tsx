@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Noto_Sans_Mono } from "next/font/google";
 import { PwaRegistration } from "@/components/PwaRegistration";
+import { BrowserTheme } from "@/components/BrowserTheme";
 import "katex/dist/katex.min.css";
 import "./globals.css";
 import "./settings.css";
@@ -19,14 +20,14 @@ export const metadata: Metadata = {
   icons: {
     icon: [
       {
-        url: "/icons/icon-192.png",
+        url: "/app-icons/icon-192.png",
         sizes: "192x192",
         type: "image/png",
       },
     ],
     apple: [
       {
-        url: "/icons/apple-touch-icon.png",
+        url: "/app-icons/apple-touch-icon.png",
         sizes: "180x180",
         type: "image/png",
       },
@@ -47,10 +48,8 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: "cover",
   interactiveWidget: "resizes-content",
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#1a1a1a" },
-  ],
+  // BrowserTheme is the sole owner of theme-color. A second viewport-generated
+  // tag would take precedence over its native light/dark media queries.
 };
 
 export default function RootLayout({
@@ -64,11 +63,12 @@ export default function RootLayout({
         <meta name="google" content="notranslate" />
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem("pi-theme");var dark=t==="dark"||((t==null||t===""||t==="auto")&&window.matchMedia("(prefers-color-scheme: dark)").matches);if(dark)document.documentElement.classList.add("dark")}catch(e){}})();`,
+            __html: `(function(){var t;try{t=localStorage.getItem("pi-theme")}catch(e){}var dark=t==="dark"||(t!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.classList.toggle("dark",dark);document.documentElement.style.colorScheme=dark?"dark":"light"})();`,
           }}
         />
       </head>
       <body translate="no" className="notranslate" suppressHydrationWarning>
+        <BrowserTheme />
         {children}
         <PwaRegistration />
       </body>

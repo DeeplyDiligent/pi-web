@@ -10,6 +10,21 @@ Typecheck: `node_modules/.bin/tsc --noEmit`
 Lint: `npm run lint`  
 **Never run `next build` during dev** — pollutes `.next/` and breaks `npm run dev`.
 
+### Computer-use is opt-in only
+
+Do not invoke any `computer_use_*` tool while working on Pi Web unless the user explicitly asks for computer-use or live visual browser interaction in the current request. A UI change, a request to test or deploy it, or checklist language such as “bounded UI test” is **not** permission to use computer-use. Default to source review, focused automated tests, TypeScript/lint, private builds, and HTTP/API/bundle verification. If behavior can only be verified visually, report that limitation or ask for permission; do not open or control a browser automatically.
+
+### Local deployment preference
+
+The user has requested automatic deployment of future UI changes to this Pi Web installation (2026-09-09). After implementing and testing a requested UI change, build and deploy it without asking for a separate build/restart confirmation.
+
+- This is standing approval for requested UI changes on the existing deployment, not for dependency upgrades, remote pushes, auth/tunnel changes, or unrelated service changes.
+- Follow `.agents/skills/update-pi-web/SKILL.md`: build only in a separate private release directory with its own dependencies/output; never run a production build in this active checkout. Preserve existing local changes and a rollback build.
+- Check disk space before staging. Prefer moving an idle, agent-owned dependency copy with an identical lockfile into the new private release instead of accumulating duplicate `node_modules` directories. Never move or share the live installation's dependencies; keep source archives and rollback outputs intact and record any relocated build artifacts.
+- Re-discover the actual service before each deployment. The current production service is user `pi-web.service`, serving `127.0.0.1:7633` via `https://pi.deepb.com.au`; port 30141 is for development, not production.
+- Announce the brief interruption, use an independent supervisor, wait for active agent turns to finish, and verify the exact served bundle, fresh PID, local/public health, and authentication. Roll back on failure; report a queued restart as queued, not completed.
+- Public health checks must use a working transport: `curl` succeeds here, while Python urllib's default client has received Cloudflare error 1010 and caused a false rollback. Do not weaken Cloudflare or authentication to make a check pass.
+
 ### Dev server troubleshooting
 
 - Before starting a server, run `lsof -nP -iTCP:30141 -sTCP:LISTEN` and reuse the existing Pi Web process when it is healthy. A second `next dev` for the same checkout cannot use a different port as a workaround because both processes contend for `.next/dev/lock`.
@@ -133,8 +148,14 @@ hooks/
 **Fix**: `send("fork")` captures `newSessionId`, then calls `this.destroy()` before returning. The next request for the original session reloads a clean AgentSession from the original file.
 
 ### Two kinds of branching — don't confuse them
-- **Fork** (Fork button on user message): creates a new independent `.jsonl` file. Shown as a child in the sidebar tree via `parentSession` header field.
+- **Fork** (Fork button at the end of a completed assistant response): uses `fork_branch` to copy the persisted path through that response into a new independent `.jsonl` file. It leaves the source wrapper alive, even while another turn is running. Shown as a child in the sidebar tree via `parentSession` header field. The legacy `fork`/`clone` replacement commands still require idle sessions and shut down their source wrappers.
 - **In-session branch** (Continue button / BranchNavigator): calls `navigate_tree` within the same file. Multiple entries share the same `parentId`. Switching between them calls `/api/sessions/[id]/context?leafId=`.
+
+### Editing during a run
+- `edit_message` validates a user entry, clears queued messages, cancels extension UI and shell work, awaits SDK abort and wrapper prompt settlement, then navigates to before that user message. Concurrent submissions are rejected during the transition; failed abort or extension-cancelled navigation must not fill the editor.
+- The last optimistic user message may not have an entry id yet. Its exact text (or compact skill command) is checked against the latest live user entry before editing so a stale click cannot rewind a different prompt.
+- The response returns the original user message, including images. The client invalidates old SSE/reconciliation/history generations and reloads the live branch before populating the composer. The SDK's user-leaf no-op needs an explicit parent/root rewind for messages stopped before assistant output.
+- This branches conversation history; it does not undo file or external side effects from tools already run.
 
 ### Session files can be fully rewritten
 `parentSession` in the header is **display metadata only** — has zero effect on chat content. Safe to `writeFileSync` the entire file (pi does this itself during migrations). Used when cascade-reparenting children on delete.

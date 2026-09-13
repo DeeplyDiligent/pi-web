@@ -13,6 +13,9 @@ const MODEL_INFO_FILE = "foundry.modelinfo.json";
 const CORE_DLL = "Microsoft.AI.Foundry.Local.Core.dll";
 const APP_NAME = "pi-web-speech";
 const STREAM_CHUNK_BYTES = 32 * 1024;
+// Reclaim abandoned microphones, not long recordings. PCM uploads (including
+// silence) renew this lease; there is deliberately no total dictation limit.
+const SPEECH_UPLOAD_IDLE_MS = 3 * 60 * 1000;
 
 type FoundryLiveSession = ReturnType<ReturnType<IModel["createAudioClient"]>["createLiveTranscriptionSession"]>;
 
@@ -186,7 +189,7 @@ export async function createLiveSpeechSession(): Promise<string> {
     transcript: "",
     listeners: new Set(),
     drain: Promise.resolve(),
-    expires: setTimeout(() => { void cancelLiveSpeechSession(id); }, 3 * 60 * 1000),
+    expires: setTimeout(() => { void cancelLiveSpeechSession(id); }, SPEECH_UPLOAD_IDLE_MS),
   };
   session.drain = (async () => {
     try {
@@ -227,6 +230,8 @@ export async function appendLiveSpeechAudio(id: string, pcm: Uint8Array): Promis
   if (pcm.byteLength === 0 || pcm.byteLength % 2 !== 0) throw new Error("Invalid PCM audio data");
   const session = requireLiveSession(id);
   if (session.finishing) throw new Error("Speech session is already finishing.");
+  if (session.drainError) throw session.drainError;
+  session.expires.refresh();
   await session.sdk.append(pcm);
 }
 
@@ -245,6 +250,8 @@ export function subscribeLiveSpeechSession(
 export async function finishLiveSpeechSession(id: string): Promise<string> {
   const session = requireLiveSession(id);
   if (!session.finishing) {
+    // Explicit stop owns disposal while the SDK drains its final results.
+    clearTimeout(session.expires);
     session.finishing = (async () => {
       try {
         await session.sdk.stop();

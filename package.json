@@ -87,5 +87,8 @@
     "remark-math": "^6.0.0",
     "tailwindcss": "^4.2.2",
     "typescript": "^5"
+  },
+  "allowScripts": {
+    "foundry-local-sdk@1.2.3": true
   }
 }

@@ -20,6 +20,7 @@
 }
 
 :root {
+  color-scheme: light;
   --bg: #ffffff;
   --bg-panel: #f5f5f5;
   --bg-hover: #eeeeee;
@@ -39,6 +40,7 @@
 }
 
 html.dark {
+  color-scheme: dark;
   --bg: #1a1a1a;
   --bg-panel: #242424;
   --bg-hover: #2e2e2e;

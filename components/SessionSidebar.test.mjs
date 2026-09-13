@@ -93,6 +93,27 @@ test("formats session timestamps with the active locale", () => {
   assert.match(sessionItemSource, /formatRelativeTime\(session\.modified, locale\)/);
 });
 
+test("defaults the sidebar list to All projects", () => {
+  assert.match(source, /const \[showAllProjects, setShowAllProjects\] = useState\(true\)/);
+});
+
+test("All projects broadens the thread list without changing the active workspace", () => {
+  assert.match(source, /const filteredSessions = !showAllProjects && selectedProject\s*\? sessionsForProject\(allSessions, selectedProject\.key\)\s*: allSessions/);
+  const allProjectsAction = source.slice(source.indexOf("setShowAllProjects(true)"), source.indexOf("aria-pressed={showAllProjects}"));
+  assert.ok(allProjectsAction.length > 0);
+  assert.doesNotMatch(allProjectsAction, /setSelectedCwd/);
+  assert.match(source, /setShowAllProjects\(false\);\s*setSelectedCwd\(project\.root\)/);
+  const selectThread = source.slice(source.indexOf("const handleSelectSessionFromList"), source.indexOf("const recentProjects"));
+  assert.match(selectThread, /setSelectedCwd\(s\.cwd\)/);
+  assert.doesNotMatch(selectThread, /setShowAllProjects/);
+});
+
+test("thread metadata shows the project folder instead of a message count", () => {
+  assert.match(sessionItemSource, /getFileName\(session\.projectRoot \?\? session\.cwd\)/);
+  assert.doesNotMatch(sessionItemSource, /session\.messageCount|sidebar\.messagesCount/);
+  assert.match(sessionItemSource, /formatRelativeTime\(session\.modified, locale\)/);
+});
+
 test("does not persist an unchanged fallback title ending in whitespace", () => {
   assert.match(
     sessionItemSource,

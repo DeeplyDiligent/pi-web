@@ -306,6 +306,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [contextUsage, setContextUsage] = useState<{ percent: number | null; contextWindow: number; tokens: number | null } | null>(null);
   const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
   const [forkingEntryId, setForkingEntryId] = useState<string | null>(null);
+  const [editingMessage, setEditingMessage] = useState(false);
+  const branchActionRef = useRef(false);
+  const historyGenerationRef = useRef(0);
   const [currentModelOverride, setCurrentModelOverride] = useState<{ provider: string; modelId: string } | null>(null);
   const [pendingModel, setPendingModel] = useState<{ provider: string; modelId: string } | null>(null);
   const [modelSwitching, setModelSwitching] = useState(false);
@@ -457,13 +460,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } satisfies SessionStatsInfo;
   }, [messages, sessionStatsOverride, contextUsage, data?.context.messages, data?.filePath, data?.totalActiveMs, data?.stats, session?.id, session?.name]);
 
-  const loadSession = useCallback(async (sid: string, showLoading = false, includeState = false) => {
+  const loadSession = useCallback(async (sid: string, showLoading = false, includeState = false, strict = false) => {
+    const generation = historyGenerationRef.current;
     let messagesLoaded = false;
     try {
       if (showLoading) setLoading(true);
       const params = new URLSearchParams({ deferThinking: "1", deferMedia: "1" });
       const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}?${params}`);
       if (res.status === 404) {
+        if (strict) throw new Error("Session not found");
         if (showLoading) {
           setData(null);
           setActiveLeafId(null);
@@ -477,7 +482,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json() as SessionData;
-      if (sessionIdRef.current !== sid) return null;
+      if (sessionIdRef.current !== sid || generation !== historyGenerationRef.current) return null;
       const persistedMessages = d.context.messages;
       setData(d);
       setActiveLeafId(d.leafId);
@@ -500,7 +505,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         const stateRes = await fetch(`/api/sessions/${encodeURIComponent(sid)}/state`);
         if (!stateRes.ok) throw new Error(`HTTP ${stateRes.status}`);
         const agentState = await stateRes.json() as { running: boolean; state?: AgentStateResponse };
-        if (sessionIdRef.current !== sid) return null;
+        if (sessionIdRef.current !== sid || generation !== historyGenerationRef.current) return null;
 
         const liveState = agentState.state;
         if (liveState) {
@@ -519,7 +524,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         return null;
       }
     } catch (e) {
+      if (generation !== historyGenerationRef.current) return null;
       setError(String(e));
+      if (strict) throw e;
       return null;
     } finally {
       if (showLoading && !messagesLoaded) setLoading(false);
@@ -527,6 +534,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [setToolPresetState]);
 
   const loadContext = useCallback(async (sid: string, leafId: string | null, before?: string | null, options?: { tail?: number; signal?: AbortSignal }) => {
+    const generation = historyGenerationRef.current;
     try {
       const params = new URLSearchParams({ deferThinking: "1", deferMedia: "1" });
       if (leafId) params.set("leafId", leafId);
@@ -538,7 +546,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const res = await fetch(url, { signal: options?.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json() as { context: SessionData["context"] };
-      if (sessionIdRef.current !== sid || options?.signal?.aborted || !sessionHookMountedRef.current) return;
+      if (sessionIdRef.current !== sid || generation !== historyGenerationRef.current || options?.signal?.aborted || !sessionHookMountedRef.current) return;
       setHistoryCursor(d.context.oldestEntryId);
       setHasEarlierMessages(d.context.hasMore);
       setData((prev) => {
@@ -1287,6 +1295,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   handleAgentEventRef.current = handleAgentEvent;
 
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
+    if (branchActionRef.current) return;
     const trimmedMessage = message.trim();
     if (!trimmedMessage && !images?.length) return;
     if (agentRunningRef.current || bashRunningRef.current) {
@@ -1452,13 +1461,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, []);
 
   const handleFork = useCallback(async (entryId: string) => {
-    if (bashRunningRef.current) return;
+    if (branchActionRef.current) return;
     const sid = sessionIdRef.current;
     if (!sid) return;
+    branchActionRef.current = true;
     setForkingEntryId(entryId);
     try {
       const result = await sendAgentCommand<{ cancelled?: boolean; newSessionId?: string }>(sid, {
-        type: "fork",
+        type: "fork_branch",
         entryId,
       });
       const { cancelled, newSessionId } = result ?? {};
@@ -1466,23 +1476,54 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         onSessionForked?.(newSessionId);
       }
     } catch (e) {
-      console.error("Fork failed:", e);
+      addNotice({ type: "error", message: `Fork failed: ${e instanceof Error ? e.message : String(e)}` });
     } finally {
+      branchActionRef.current = false;
       setForkingEntryId(null);
     }
-  }, [onSessionForked]);
+  }, [addNotice, onSessionForked]);
 
-  const handleNavigate = useCallback(async (entryId: string) => {
-    if (bashRunningRef.current) return;
+  const handleEdit = useCallback(async (entryId: string | null, message: UserMessage): Promise<UserMessage | null> => {
     const sid = sessionIdRef.current;
-    if (!sid) return;
-    sendAgentCommand(sid, { type: "navigate_tree", targetId: entryId }).catch(() => {});
-    setActiveLeafId(entryId);
-    await loadContext(sid, entryId);
-  }, [loadContext]);
+    if (!sid || branchActionRef.current) return null;
+    branchActionRef.current = true;
+    setEditingMessage(true);
+    try {
+      const expectedText = typeof message.content === "string" ? message.content
+        : message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+      const result = await sendAgentCommand<{ cancelled: boolean; message?: UserMessage }>(sid, {
+        type: "edit_message", entryId, expectedText,
+      });
+      if (result.cancelled || !result.message || sessionIdRef.current !== sid || !sessionHookMountedRef.current) return null;
+      // Ignore late SSE/reconciliation/history reads from the run we stopped.
+      promptRunIdRef.current += 1;
+      historyGenerationRef.current += 1;
+      cancelEventStreamGrace();
+      closeEvents();
+      rpcPromptPendingRef.current = false;
+      sdkAgentActiveRef.current = false;
+      optimisticUserMessageKeyRef.current = null;
+      bashRecoveryIdRef.current += 1;
+      bashRunningRef.current = false;
+      setBashRunning(false);
+      setPendingBash(null);
+      setIsCompacting(false);
+      setContextUsage(null);
+      setQueuedMessages({ steering: [], followUp: [] });
+      settleUiStage();
+      await loadSession(sid, false, false, true);
+      return sessionIdRef.current === sid && sessionHookMountedRef.current ? result.message : null;
+    } catch (e) {
+      addNotice({ type: "error", message: `Could not edit message: ${e instanceof Error ? e.message : String(e)}` });
+      return null;
+    } finally {
+      branchActionRef.current = false;
+      setEditingMessage(false);
+    }
+  }, [addNotice, cancelEventStreamGrace, closeEvents, loadSession, settleUiStage]);
 
   const handleLeafChange = useCallback(async (leafId: string | null) => {
-    if (bashRunningRef.current) return;
+    if (branchActionRef.current || bashRunningRef.current) return;
     setActiveLeafId(leafId);
     const sid = sessionIdRef.current;
     if (!sid) return;
@@ -2107,7 +2148,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     // State
     data, loading, error, activeLeafId, messages, entryIds, historyCursor, hasEarlierMessages, streamState,
     agentRunning, modelNames, modelList, modelError, modelScopeWarnings, modelThinkingLevels, modelThinkingLevelMaps, newSessionModel, toolPreset, thinkingLevel,
-    retryInfo, contextUsage, systemPrompt, forkingEntryId,
+    retryInfo, contextUsage, systemPrompt, forkingEntryId, editingMessage,
     isCompacting, compactError, compactResult, currentModel, displayModel, modelSwitching, sessionStats,
     slashCommands, slashCommandsLoading, queuedMessages,
     notices: noticeState.visible, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
@@ -2119,7 +2160,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     sessionIdRef, scrollContainerRef,
     lastUserMsgRef, pendingScrollToUserRef, initialScrollDoneRef,
     // Actions
-    handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
+    handleSend, handleAbort, handleFork, handleEdit, handleModelChange,
     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
     handleRecallQueue,
     handleBuiltinSlashCommand,

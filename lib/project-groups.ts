@@ -8,6 +8,12 @@ export interface RecentProject {
   root: string;
 }
 
+/** Match folder names or any part of the workspace path, preserving activity order. */
+export function filterProjects(projects: readonly RecentProject[], query: string): RecentProject[] {
+  const needle = query.trim().toLowerCase();
+  return projects.filter((project) => project.root.toLowerCase().includes(needle));
+}
+
 /** Projects sorted by most recent activity and deduplicated by stable key. */
 export function getRecentProjects(sessions: readonly SessionInfo[]): RecentProject[] {
   const latestByProject = new Map<string, { root: string; modified: string }>();

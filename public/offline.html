@@ -74,7 +74,20 @@
   </head>
   <body>
     <main>
-      <img src="/icons/icon-192.png" alt="" />
+      <img id="app-icon" src="/icons/icon-blue-v1-192.png" alt="" />
+      <script>
+        // Reuse the last fetched manifest offline, including the work badge.
+        if ("caches" in window) {
+          caches.match("/manifest.webmanifest").then(function(response) {
+            return response ? response.json() : null;
+          }).then(function(manifest) {
+            var icon = manifest && manifest.icons && manifest.icons[0];
+            if (icon && /^\/icons\/icon-blue-v1(?:-work)?-192\.png$/.test(icon.src)) {
+              document.getElementById("app-icon").src = icon.src;
+            }
+          }).catch(function() {});
+        }
+      </script>
       <h1>Pi Web is offline</h1>
       <p>Reconnect to the local Pi Web server, then try again.</p>
       <button type="button" onclick="location.reload()">Try again</button>

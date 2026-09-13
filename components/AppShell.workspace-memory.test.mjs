@@ -54,6 +54,54 @@ test("workspace restoration remains inside the cross-project branch", () => {
   );
 });
 
+test("choosing another workspace creates a fresh thread without restoring its remembered session", () => {
+  const chooseStart = source.indexOf("  const handleNewThreadWorkspace =");
+  const chooseEnd = source.indexOf("  const renderRefreshButton", chooseStart);
+  const callbacks = [
+    callbackBody("restoreWorkspaceContext", "handleCwdChange"),
+    callbackBody("handleCwdChange", "handleSelectSession"),
+    callbackBody("handleNewSession", "hydrateSelectedSession"),
+    source.slice(chooseStart, chooseEnd),
+  ].join("\n");
+  let restoreAttempts = 0;
+  const context = vm.createContext({
+    ...draftStore,
+    crypto: globalThis.crypto,
+    window: { location: { pathname: "/" } },
+    router: { replace() {} },
+    getLastOpenSession: () => { restoreAttempts++; return "remembered"; },
+    useCallback: (callback) => callback,
+    useGlobalKeyboardShortcuts() {},
+    activeNewSessionDraftKeyRef: { current: null },
+    activeProjectKeyRef: { current: "/old" },
+    suppressCwdBumpRef: { current: false },
+    invalidateWorkspaceRestore() {},
+    isMobile: false,
+    activeCwd: "/old",
+    newSessionCwd: null,
+    selectedSession: { id: "old-thread", cwd: "/old" },
+    activeFileTabId: "file:/old/readme.md",
+    fileTabs: [{ id: "file:/old/readme.md" }],
+    sessionKey: 0,
+  });
+  for (const [setter] of callbacks.matchAll(/\bset[A-Z]\w*(?=\()/g)) {
+    const state = setter[3].toLowerCase() + setter.slice(4);
+    context[setter] = (value) => { context[state] = typeof value === "function" ? value(context[state]) : value; };
+  }
+  const helper = source.slice(source.indexOf("function parkedNewSessionDraftKey"), source.indexOf("export function AppShell"));
+  vm.runInContext(stripTypeScriptTypes(`${helper}\n${callbacks}\nglobalThis.choose = handleNewThreadWorkspace; globalThis.reportCwd = handleCwdChange;`), context);
+  context.choose({ cwd: "/new", projectRoot: "/new", projectKey: "canonical-new" });
+  context.reportCwd("/new", "/new", "canonical-new");
+  assert.equal(context.activeCwd, "/new");
+  assert.equal(context.activeProjectKeyRef.current, "canonical-new");
+  assert.equal(context.newSessionCwd, "/new");
+  assert.equal(context.selectedSession, null);
+  assert.equal(context.sessionKey, 1);
+  assert.equal(context.fileTabs.length, 0);
+  assert.equal(context.newThreadDialogOpen, false);
+  assert.equal(restoreAttempts, 0);
+});
+
 test("New restores the draft after session navigation and workspace auto-restore", async (t) => {
   const callbacks = [
     callbackBody("restoreWorkspaceContext", "handleCwdChange"),

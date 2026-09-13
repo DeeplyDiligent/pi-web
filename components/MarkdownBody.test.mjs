@@ -9,7 +9,8 @@ const jiti = createJiti(import.meta.url, {
   tsconfigPaths: true,
 });
 const { MarkdownBody } = await jiti.import("./MarkdownBody.tsx");
-const { normalizeDisplayMath } = await jiti.import("../lib/markdown.ts");
+const { normalizeDisplayMath, markdownPreviewRemarkPlugins, markdownPreviewRehypePlugins } = await jiti.import("../lib/markdown.ts");
+const { default: ReactMarkdown } = await jiti.import("react-markdown");
 const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 
 function renderMarkdown(markdown, props = {}) {
@@ -64,6 +65,68 @@ test("still renders double-tilde strikethrough", () => {
   const html = renderMarkdown("~~gone~~");
 
   assert.match(html, /<del>gone<\/del>/);
+});
+
+test("keeps financial amounts and surrounding bold prose out of LaTeX", () => {
+  const html = renderMarkdown(`### The trade-off
+
+The new $7.50m plan again uses almost all available capacity: its minimum margin above the protected reserve is only **$2,520**.
+
+The less-aggressive option—**pause travel but retain the previous investment schedule**—has about **$54,477 minimum reserve headroom**, lower final debt, and passes the +1-point rate test.
+
+Resuming travel means roughly **$49,955 of travel spending**, leaving only **$3,110 surplus before investment returns**.
+
+| Scenario | Net worth |
+|---|---:|
+| Previous best | **$6.42m** |
+| Reoptimise | **$7.50m** |`);
+  assert.doesNotMatch(html, /katex|math-inline|math-display/);
+  assert.match(html, /The new \$7\.50m plan again uses almost all available capacity/);
+  assert.match(html, /<strong>\$2,520<\/strong>/);
+  assert.match(html, /<strong>\$54,477 minimum reserve headroom<\/strong>/);
+  assert.match(html, /<td[^>]*><strong>\$7\.50m<\/strong><\/td>/);
+});
+
+test("currency ranges, inline code, links and streaming partial amounts stay literal", () => {
+  for (const markdown of [
+    "$100 to $200, $350k or $7.50m.",
+    "Budget $5–$10; AUD$12.50 and US$20.",
+    "Keep `$HOME` and pay $5 for **$10 value**.",
+    "[Budget $5](https://example.com/$5) and **$10**.",
+    "The new $7.50m plan has only **$2,",
+    "Cost $7.50m\nwith only **$2,520** remaining.",
+  ]) {
+    assert.doesNotMatch(renderMarkdown(markdown), /katex/);
+  }
+});
+
+test("preserves intentional inline and display equations alongside currency", () => {
+  const html = renderMarkdown(String.raw`Budget $100 to $200; calculate $x^2 + y^2 = z^2$ and $2x + 1$.
+
+The $7.50m plan uses **$x$** as a variable.
+
+Also \( 2x + 1 \).
+
+$$E = mc^2$$`);
+  assert.match(html, /Budget \$100 to \$200/);
+  assert.match(html, /The \$7\.50m plan uses/);
+  assert.equal((html.match(/class="katex"/g) ?? []).length, 5);
+  assert.match(html, /class="katex-display"/);
+});
+
+test("file previews use the same currency-safe math parser", () => {
+  const html = renderToStaticMarkup(React.createElement(ReactMarkdown, {
+    remarkPlugins: markdownPreviewRemarkPlugins,
+    rehypePlugins: markdownPreviewRehypePlugins,
+  }, "The $7.50m plan leaves **$2,520**. Use $2 sin(x)$ or $2xy$ in equations."));
+  assert.match(html, /The \$7\.50m plan leaves <strong>\$2,520<\/strong>/);
+  assert.equal((html.match(/class="katex"/g) ?? []).length, 2);
+});
+
+test("does not interpret currency inside code or escaped dollars as math", () => {
+  const html = renderMarkdown("`$5 and $10`\n\n```text\n$5 and $10\n```\n\n\\$5 and \\$10");
+  assert.doesNotMatch(html, /katex/);
+  assert.match(html, /\$5 and \$10/);
 });
 
 test("renders LaTeX parenthesis delimiters as inline math", () => {

@@ -1,130 +1,62 @@
 ---
 name: update-pi-web
-description: Update, build, and host the local Pi Web server while preserving local working-tree changes and respecting Microsoft's five-day npm package delay.
+description: Use when auditing, updating, or restarting this Pi Web deployment safely.
 ---
 
-# Update Pi Web
+# Update Pi Web Safely
 
-Use this skill when updating or restarting the Pi Web instance on this machine.
+Read the checkout's `AGENTS.md` first. This Linux checkout is `/home/deep/dev/pi-web`; port 30141 is the expected listener, not proof of process identity. Do not use Windows work-laptop commands here. Read [the Windows reference](references/windows-work-laptop.md) only when operating on that actual machine.
 
-## Local setup
+## Audit before apply
 
-- Source repository: `C:\GitHub\pi-web`
-- Fork (`origin`): `https://github.com/DeeplyDiligent/pi-web.git`
-- Upstream (`upstream`): `https://github.com/agegr/pi-web.git`
-- Port: `30141`
-- Public hostname: `work-laptop-pi.deepb.com.au`
-- npm registry: `https://packagefeedproxy.microsoft.io/npm/`
+A request to check versions is not permission to install dependencies, rewrite Git history, push, build, restart, or expose a service. Present the proposed version/commit, local-change reconciliation, tests, registry constraints, interruption, backup, and rollback first.
 
-## Critical package-age constraint
+1. Check for an existing listener: `lsof -nP -iTCP:30141 -sTCP:LISTEN`. Identify its exact PID, cwd, owning unit/launcher, and whether it runs `next dev` or production. Reuse a healthy instance; do not start a second dev process on another port against the same `.next/dev/lock`.
+2. Record `git status --short`, HEAD, branch, and upstream/remotes (redact embedded credentials). Never assume a remote named `origin` is upstream. Identify staged/unstaged/untracked local modifications and do not overwrite them.
+3. Read `package.json`, the lockfile, installed Node/npm versions, and `npm config get registry`. Inspect registry configuration without printing auth tokens or whole `.npmrc` files.
+4. Check application/package versions with read-only metadata and approved Git fetches; neither a fetched ref nor an outdated list is permission to update.
+5. Apply package-age restrictions only when required by the actual configured registry/policy. A commit age alone does not establish dependency publication ages or availability. Do not bypass corporate registries or globally weaken npm policy.
+6. Baseline direct HTTP/API behavior, bounded logs, and active runs. Discover the real public hostname and existing auth/tunnel configuration without exposing secrets; never borrow a laptop hostname.
 
-Microsoft's npm proxy blocks packages published less than five days ago. Do not
-build the newest Pi Web commit when it references packages newer than five full
-days.
+## Preserve and reconcile
 
-Choose the newest commit whose commit timestamp is at least five days old:
+After approval, create a private timestamped backup outside the repository/build tree. Save old HEAD, branch, status, tracked binary diff, staged diff, and reviewed important untracked source. Preserve deployment metadata and necessary secret files privately without printing them. Verify backup readability; a patch alone does not save untracked files.
 
-```powershell
-$cutoff = (Get-Date).AddDays(-5).ToString("o")
-$commit = git rev-list -1 --before=$cutoff origin/main
-git show -s --date=iso-strict --format="%H%n%h %ad %s" $commit
-```
+Prefer an isolated worktree/branch to evaluate the selected release and reconcile local modifications. Do not auto-commit all user work, run `git reset --hard`/`git clean`, blindly pop a stash, rebase `main`, or force-push. A deployment update does not authorize any remote push. If history rewriting or publication is truly needed, propose it separately.
 
-Confirm that every pinned `@earendil-works/pi-*` dependency at that commit is
-available through the Microsoft registry before building:
+Install only through the selected checkout's existing lockfile/manager and configured registry after reviewing relevant lifecycle scripts. Use `npm ci` when consistent with project requirements; do not opportunistically regenerate the lockfile or perform major upgrades. Do not run `npm link` merely to host this checkout.
 
-```powershell
-npm view "@earendil-works/pi-coding-agent@<version>" version `
-  --registry=https://packagefeedproxy.microsoft.io/npm/
-```
+## Development mode: no production build
 
-If any dependency is unavailable, move to the previous release commit. Do not
-bypass the Microsoft proxy with another public registry.
+**Never run `next build` or `npm run build` in this active development checkout.** They can pollute `.next` and break the dev server. Do not use a webpack dev fallback. For source verification use the project-approved focused tests, `node_modules/.bin/tsc --noEmit`, and `npm run lint`, reporting pre-existing failures separately.
 
-## Preserve local changes
+For a browser-only module-factory/HMR overlay:
 
-Never discard, reset, or overwrite changes in `C:\GitHub\pi-web`. Show
-`git status --short` before and after the update.
+1. Use the browser's explicit reload action.
+2. Recheck a fresh page, direct HTTP/API response, and current server logs.
+3. Restart only if fresh-page/server-side checks corroborate a failure.
+4. With approved interruption, gracefully stop only the exact dev process. Move `.next` to a unique `mktemp -d` backup; do not delete it blindly.
+5. Restart with the standard `npm run dev` via the verified supervisor/launcher. Confirm there is only one listener and no competing lock holder.
 
-Before moving `main`, preserve uncommitted work in a commit on a temporary backup
-branch. Replay the fork's custom commits onto the eligible upstream release so
-the deployed build includes those changes.
+A healthy dev server does not need a restart merely because skill files changed. Next may generate an `AGENTS.md` block at startup; inspect status and exclude unrelated generated changes from any later commit.
 
-## Update and build
+## Production deployment
 
-1. Confirm the remotes and fetch without modifying the checked-out branch:
+Only for an explicitly selected production deployment, build in a **separate release/worktree directory** with its own dependencies and build output, after reading that checkout's instructions. Inspect the actual package scripts; do not hardcode a bundler from another version. Run the permitted production build there, not in `/home/deep/dev/pi-web` while it serves development.
 
-   ```powershell
-   git -C C:\GitHub\pi-web remote -v
-   git -C C:\GitHub\pi-web fetch --all --tags --prune
-   ```
+Preserve the current release and service definition for rollback. Use the existing verified user service/launcher and loopback binding; do not create a second production/dev listener or a new tunnel automatically. Configure only the actual approved public hostname and retain its auth boundary.
 
-2. Select and display the newest eligible commit using the five-day cutoff.
+## Restart and verify
 
-3. Create a backup branch before rewriting `main`. Commit any working changes
-   with a descriptive message so they can be replayed safely.
+A restart of the service hosting this agent can kill the turn and its children. Finish unrelated work, save exact pending actions/post-reconnect checks, and warn immediately before interruption. Use an independent supervisor/operator when needed; do not assume a child shell outlives a service restart.
 
-   ```powershell
-   git -C C:\GitHub\pi-web branch backup/pre-update-<timestamp>
-   git -C C:\GitHub\pi-web add -A
-   git -C C:\GitHub\pi-web commit -m "<description>"
-   ```
+After the approved restart/switch, verify:
 
-4. Rebase the fork's custom commits onto the selected eligible release. Resolve
-   conflicts by preserving the custom behavior while adapting it to the older
-   release APIs.
+- exact unit/launcher, PID and fresh start time, single intended listener;
+- correct mode and selected commit/release, with local customizations preserved;
+- direct root and bounded API health, expected auth behavior, and actual public route;
+- recent logs without new startup, dependency, or restart-loop failures;
+- relevant session UI/streaming functionality when affected, using an authorized bounded test;
+- `git status --short`, remaining unrelated changes, and readable rollback artifacts.
 
-5. Push the rewritten `main` to the fork only:
-
-   ```powershell
-   git -C C:\GitHub\pi-web push --force-with-lease origin main
-   ```
-
-   Never push to `upstream`.
-
-6. Install and build through the configured Microsoft npm proxy:
-
-   ```powershell
-   Set-Location C:\GitHub\pi-web
-   npm install --registry=https://packagefeedproxy.microsoft.io/npm/
-   npm run build
-   npm link
-   ```
-
-   `npm link` exposes this fork's `pi-web` command globally. The command ensures
-   the `work-laptop-pi` Cloudflare tunnel is running, trusts the public hostname,
-   and starts the production server from this repository.
-
-## Host
-
-Stop only the process listening on port `30141`, then start the production
-server as a detached background process:
-
-```powershell
-$listener = Get-NetTCPConnection -LocalPort 30141 -State Listen -ErrorAction SilentlyContinue |
-  Select-Object -First 1
-if ($listener) {
-  Stop-Process -Id $listener.OwningProcess
-}
-
-Set-Location C:\GitHub\pi-web
-$env:PI_WEB_ALLOWED_HOSTS = "work-laptop-pi.deepb.com.au"
-npm run start
-```
-
-Keep the server process detached so it survives the Copilot session.
-
-## Verify
-
-Verify both the local listener and trusted proxy hostname:
-
-```powershell
-Get-NetTCPConnection -LocalPort 30141 -State Listen
-Invoke-WebRequest http://127.0.0.1:30141 `
-  -Headers @{ Host = "work-laptop-pi.deepb.com.au" } `
-  -UseBasicParsing
-git -C C:\GitHub\pi-web status --short
-```
-
-Report the hosted commit, release version, HTTP status, and confirmation that
-the fork's custom changes are present.
+Report actual checks and any unverified capability. Do not claim completion from a process launch, package install, or build alone. Do not perform an update/restart as a side effect of reading this skill.

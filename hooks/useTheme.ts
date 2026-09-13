@@ -46,6 +46,10 @@ function resolveTheme(preference: ThemePreference): ResolvedTheme {
 function applyDomTheme(theme: ResolvedTheme): void {
   if (typeof document === "undefined") return;
   document.documentElement.classList.toggle("dark", theme === "dark");
+  document.documentElement.style.colorScheme = theme;
+  // BrowserTheme owns the theme-color tags declaratively. Do not mutate those
+  // nodes here: changing hoisted metadata before hydration makes React insert
+  // duplicates and leaves the browser with competing theme-colour candidates.
 }
 
 function ensureState(): ThemeState {

@@ -1,4 +1,4 @@
-import { readdir, realpath, stat } from "fs/promises";
+import { mkdir, readdir, realpath, stat } from "fs/promises";
 import { homedir } from "os";
 import path from "path";
 
@@ -55,6 +55,37 @@ export function getParentDirectory(directory: string): string | null {
 
 export async function resolveDirectory(directory: string): Promise<string> {
   return realpath(normalizeDirectory(directory));
+}
+
+export class InvalidDirectoryNameError extends Error {
+  constructor() {
+    super("Enter a folder name without slashes or control characters");
+    this.name = "InvalidDirectoryNameError";
+  }
+}
+
+/** Create one direct child of an existing directory and return its canonical path. */
+export async function createChildDirectory(parentDirectory: string, name: string): Promise<string> {
+  const folderName = name.trim();
+  if (
+    !folderName
+    || folderName === "."
+    || folderName === ".."
+    || /[\\/]/.test(folderName)
+    || /[\u0000-\u001f]/.test(folderName)
+  ) {
+    throw new InvalidDirectoryNameError();
+  }
+
+  const resolvedParent = await resolveDirectory(parentDirectory);
+  const parentStat = await stat(resolvedParent);
+  if (!parentStat.isDirectory()) {
+    throw Object.assign(new Error("Parent path is not a directory"), { code: "ENOTDIR" });
+  }
+
+  const createdPath = path.join(resolvedParent, folderName);
+  await mkdir(createdPath);
+  return realpath(createdPath);
 }
 
 export async function listDirectories(directory: string): Promise<BrowsableDirectory[]> {

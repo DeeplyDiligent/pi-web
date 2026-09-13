@@ -1,7 +1,6 @@
 "use client";
 
 export const SPEECH_SAMPLE_RATE = 16_000;
-export const MAX_SPEECH_RECORDING_MS = 2 * 60 * 1000;
 
 export interface SpeechRecording {
   pcm: Uint8Array;

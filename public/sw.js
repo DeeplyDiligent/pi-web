@@ -1,13 +1,19 @@
 const CACHE_PREFIX = "pi-web";
-const CACHE_VERSION = new URL(self.location.href).searchParams.get("v") || "dev";
+// The offline page and icon precache changed without a package-version bump.
+const CACHE_VERSION = `${new URL(self.location.href).searchParams.get("v") || "dev"}-icons-blue-v1`;
 const STATIC_CACHE = `${CACHE_PREFIX}-static-${CACHE_VERSION}`;
 const OFFLINE_URL = "/offline.html";
 const PRECACHE_URLS = [
   OFFLINE_URL,
   "/manifest.webmanifest",
-  "/icons/icon-192.png",
-  "/icons/icon-512.png",
-  "/icons/apple-touch-icon.png",
+  "/icons/icon-blue-v1-192.png",
+  "/icons/icon-blue-v1-512.png",
+  "/icons/icon-blue-v1-maskable-512.png",
+  "/icons/apple-touch-icon-blue-v1.png",
+  "/icons/icon-blue-v1-work-192.png",
+  "/icons/icon-blue-v1-work-512.png",
+  "/icons/icon-blue-v1-work-maskable-512.png",
+  "/icons/apple-touch-icon-blue-v1-work.png",
 ];
 
 self.addEventListener("install", (event) => {
@@ -48,6 +54,28 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(request).catch(async () => {
         const fallback = await caches.match(OFFLINE_URL);
+        return fallback ?? Response.error();
+      }),
+    );
+    return;
+  }
+
+  // Installation metadata must refresh even when the app version is unchanged.
+  // Cache-first would keep an old Android launch/status-bar colour indefinitely.
+  if (url.pathname === "/manifest.webmanifest") {
+    event.respondWith(
+      fetch(request).then(async (response) => {
+        if (response.ok) {
+          try {
+            const cache = await caches.open(STATIC_CACHE);
+            await cache.put(request, response.clone());
+          } catch {
+            // A full/disabled cache must not hide a fresh online manifest.
+          }
+        }
+        return response;
+      }).catch(async () => {
+        const fallback = await caches.match(request);
         return fallback ?? Response.error();
       }),
     );

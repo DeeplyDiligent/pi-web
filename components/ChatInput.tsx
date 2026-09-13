@@ -28,7 +28,6 @@ import { useI18n } from "@/hooks/useI18n";
 import { useChatAppearance } from "@/hooks/useChatAppearance";
 import type { ToolPreset } from "@/lib/tool-presets";
 import {
-  MAX_SPEECH_RECORDING_MS,
   startPcmRecorder,
   type PcmRecorder,
 } from "@/lib/speech-recorder";
@@ -562,7 +561,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const speechUploadRef = useRef<Promise<void>>(Promise.resolve());
   const speechFlushTimerRef = useRef<number | null>(null);
   const speechElapsedTimerRef = useRef<number | null>(null);
-  const speechTimeoutRef = useRef<number | null>(null);
   const speechGenerationRef = useRef(0);
   const speechPressStartedAtRef = useRef(0);
   const speechWasActiveOnPressRef = useRef(false);
@@ -997,10 +995,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const clearSpeechTimers = useCallback(() => {
     if (speechFlushTimerRef.current !== null) window.clearInterval(speechFlushTimerRef.current);
     if (speechElapsedTimerRef.current !== null) window.clearInterval(speechElapsedTimerRef.current);
-    if (speechTimeoutRef.current !== null) window.clearTimeout(speechTimeoutRef.current);
     speechFlushTimerRef.current = null;
     speechElapsedTimerRef.current = null;
-    speechTimeoutRef.current = null;
   }, []);
 
   const finishSpeechRecording = useCallback(async () => {
@@ -1101,9 +1097,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       speechElapsedTimerRef.current = window.setInterval(() => {
         setSpeechElapsedSeconds((seconds) => seconds + 1);
       }, 1000);
-      speechTimeoutRef.current = window.setTimeout(() => {
-        void finishSpeechRecording();
-      }, MAX_SPEECH_RECORDING_MS);
       setSpeechStatus("recording");
       if (speechStopRequestedRef.current) void finishSpeechRecording();
     } catch (error) {
@@ -2517,38 +2510,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           minWidth: 0,
         }}>
 
-          {/* LEFT: attach + model selector (idle) or steer/followup toggle (streaming) */}
+          {/* LEFT: speech + attach + model selector */}
           {!compact && <div style={{ flex: isMobile ? "1 1 0" : "0 0 auto", minWidth: 0, overflow: "hidden", display: "flex", alignItems: "center", gap: 2 }}>
-            <button
-              className="chat-composer-attachment"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={speechStatus !== "idle"}
-             title={t("chat.attachImage")}
-              style={{
-                flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-                width: 32, height: 32, padding: 0,
-                background: "none", border: "none",
-                borderRadius: 9,
-                color: attachedImages.length ? "var(--accent)" : "var(--text-muted)",
-                cursor: "pointer",
-                opacity: 1,
-                transition: "background 0.12s, color 0.12s",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "var(--bg-hover)";
-                e.currentTarget.style.color = attachedImages.length ? "var(--accent)" : "var(--text)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "none";
-                e.currentTarget.style.color = attachedImages.length ? "var(--accent)" : "var(--text-muted)";
-              }}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                <circle cx="8.5" cy="8.5" r="1.5" />
-                <polyline points="21 15 16 10 5 21" />
-              </svg>
-            </button>
             <button
               type="button"
               className="chat-composer-mic"
@@ -2599,6 +2562,36 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   <path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8" />
                 </svg>
               )}
+            </button>
+            <button
+              className="chat-composer-attachment"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={speechStatus !== "idle"}
+             title={t("chat.attachImage")}
+              style={{
+                flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                width: 32, height: 32, padding: 0,
+                background: "none", border: "none",
+                borderRadius: 9,
+                color: attachedImages.length ? "var(--accent)" : "var(--text-muted)",
+                cursor: "pointer",
+                opacity: 1,
+                transition: "background 0.12s, color 0.12s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "var(--bg-hover)";
+                e.currentTarget.style.color = attachedImages.length ? "var(--accent)" : "var(--text)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "none";
+                e.currentTarget.style.color = attachedImages.length ? "var(--accent)" : "var(--text-muted)";
+              }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <polyline points="21 15 16 10 5 21" />
+              </svg>
             </button>
             {/* Model selector - visible always, disabled while the session or switch is busy */}
             {(modelOptions.length > 0 || model || modelError) && onModelChange && (

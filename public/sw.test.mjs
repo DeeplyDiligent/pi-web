@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 const listeners = new Map();
+globalThis.caches = { match: async () => undefined, open: async () => ({ put: async () => {} }) };
 globalThis.self = {
   location: {
     href: "https://pi.test/sw.js?v=test",
@@ -12,6 +13,42 @@ globalThis.self = {
 };
 
 await import("./sw.js");
+
+function dispatchFetch(path) {
+  let pending;
+  listeners.get("fetch")({
+    request: new Request(`https://pi.test${path}`),
+    respondWith: (promise) => { pending = promise; },
+  });
+  return pending;
+}
+
+test("manifest checks the network instead of serving stale installation metadata", async (t) => {
+  const fresh = new Response(JSON.stringify({ theme_color: "#ffffff" }));
+  t.mock.method(globalThis, "fetch", async () => fresh);
+  t.mock.method(caches, "match", async () => assert.fail("online manifest must not be cache-first"));
+  let saved;
+  t.mock.method(caches, "open", async () => ({
+    put: async (_request, response) => { saved = await response.json(); },
+  }));
+  const response = await dispatchFetch("/manifest.webmanifest");
+  assert.equal((await response.json()).theme_color, "#ffffff");
+  assert.equal(saved.theme_color, "#ffffff", "offline fallback must refresh too");
+});
+
+test("a cache write failure does not hide the live manifest", async (t) => {
+  const fresh = new Response(JSON.stringify({ theme_color: "#ffffff" }));
+  t.mock.method(globalThis, "fetch", async () => fresh);
+  t.mock.method(caches, "open", async () => { throw new Error("quota"); });
+  assert.equal(await dispatchFetch("/manifest.webmanifest"), fresh);
+});
+
+test("manifest retains a cached fallback offline", async (t) => {
+  const cached = new Response(JSON.stringify({ name: "Pi Web" }));
+  t.mock.method(globalThis, "fetch", async () => { throw new Error("offline"); });
+  t.mock.method(caches, "match", async () => cached);
+  assert.equal(await dispatchFetch("/manifest.webmanifest"), cached);
+});
 
 function dispatchNotificationClick(data) {
   let pending;

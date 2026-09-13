@@ -89,6 +89,21 @@ test("shows the follow-up shortcut in the button tooltip", () => {
   assert.match(html, /aria-keyshortcuts="Alt\+Enter"/);
 });
 
+test("renders speech before image attachment in the shared composer toolbar", () => {
+  for (const isStreaming of [false, true]) {
+    const html = renderToStaticMarkup(
+      React.createElement(I18nProvider, null, React.createElement(ChatInput, {
+        onSend() {}, onAbort() {}, isStreaming,
+      })),
+    );
+    const mic = html.indexOf('class="chat-composer-mic"');
+    const picture = html.indexOf('class="chat-composer-attachment"');
+    assert.ok(mic >= 0 && picture > mic, "speech comes first in visual and keyboard order");
+    assert.match(html.slice(mic, picture), /aria-label="Start voice input"/);
+    assert.match(html.slice(picture), /title="Attach image"/);
+  }
+});
+
 test("renders the upstream model error", () => {
   const html = renderToStaticMarkup(
     React.createElement(

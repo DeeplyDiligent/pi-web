@@ -53,6 +53,25 @@ test("keeps covered statistics and file controls out of interaction and focus", 
   assert.match(source, /aria-hidden=\{covered \? true : undefined\}/);
 });
 
+test("places New thread between Split and Refresh on mobile and desktop", () => {
+  for (const mobile of ["true", "false"]) {
+    assert.match(source, new RegExp(`renderMainFileToggle\\(${mobile}\\)\\}\\s*\\{renderNewThreadButton\\(${mobile}\\)\\}\\s*\\{renderRefreshButton\\(${mobile}\\)`));
+  }
+});
+
+test("New thread opens the workspace chooser even without an active project", () => {
+  const button = source.slice(source.indexOf("const renderNewThreadButton"), source.indexOf("const renderMainFileToggle"));
+  assert.match(button, /onClick=\{requestNewSession\}/);
+  assert.match(button, /aria-haspopup="dialog"/);
+  assert.doesNotMatch(button, /handleNewSession\(|!activeCwd/);
+  assert.match(button, /aria-label=\{translate\("chat\.newThread"\)\}/);
+  assert.match(button, /const disabled = covered/);
+  assert.match(button, /disabled=\{disabled\}/);
+  assert.match(button, /tabIndex=\{covered \? -1 : undefined\}/);
+  assert.match(button, /aria-hidden=\{covered \? true : undefined\}/);
+  assert.match(button, /visibility: covered \? "hidden" : "visible"/);
+});
+
 test("closes the mobile action layer on outside click, Escape, layout changes, and session changes", () => {
   assert.match(source, /event\.composedPath\(\)\.includes\(toolbar\)/);
   assert.match(source, /document\.addEventListener\("pointerdown", handlePointerDown, true\)/);

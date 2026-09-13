@@ -7,6 +7,7 @@ import { resolve } from "path";
 import { validateAgentImages } from "./image-attachments";
 import { invalidateModelsCache } from "./models-cache";
 import { syncCopilotModels } from "./copilot-discovery";
+import { skillExpansionToCommand } from "./slash-display";
 import { resolveVisibleModels, selectInitialModelScope } from "./model-scope";
 import {
   createProjectCommandBashExtension,
@@ -229,6 +230,7 @@ export class AgentSessionWrapper {
   private pendingPromptCount = 0;
   private activeMutatingCommands = 0;
   private sessionReplacement: "fork" | "clone" | null = null;
+  private editingMessage = false;
   private agentRunNeedsCompletion = false;
   private promptAdmissionTail: Promise<void> = Promise.resolve();
   private extensionsBound = false;
@@ -543,6 +545,9 @@ export class AgentSessionWrapper {
   async send(command: Record<string, unknown>): Promise<unknown> {
     const type = command.type as string;
     const allowedDuringReplacement = COMMANDS_ALLOWED_DURING_SESSION_REPLACEMENT.has(type);
+    if (this.editingMessage && !allowedDuringReplacement && type !== "abort" && type !== "abort_bash") {
+      throw new Error("A message is being prepared for editing");
+    }
     if (this.sessionReplacement && !allowedDuringReplacement) {
       throw new Error("Session is being copied to a new session");
     }
@@ -557,6 +562,9 @@ export class AgentSessionWrapper {
       // Status reconciliation must not postpone forced cleanup after Stop.
       if (type !== "get_state") this.resetIdleTimer();
       if (this.shouldWaitForExtensions(type)) await this.waitForExtensionsBound();
+      if (this.editingMessage && !allowedDuringReplacement && type !== "abort" && type !== "abort_bash") {
+        throw new Error("A message is being prepared for editing");
+      }
       if (this.sessionReplacement && !allowedDuringReplacement) {
         throw new Error("Session is being copied to a new session");
       }
@@ -573,6 +581,7 @@ export class AgentSessionWrapper {
         // this submission starts a run or joins its streaming queue.
         const releaseAdmission = await this.acquirePromptAdmission();
         try {
+          if (this.editingMessage) throw new Error("A message is being prepared for editing");
           if (this.inner.isBashRunning) {
             throw new Error("Cannot send a prompt while a shell command is running");
           }
@@ -757,9 +766,8 @@ export class AgentSessionWrapper {
       }
 
       case "fork_branch": {
-        if (this.isSessionRunningForReplacement()) {
-          throw new Error("Cannot fork while the session is running");
-        }
+        // Snapshot only the persisted path through this entry. Do not mutate or
+        // shut down the source wrapper: it may still be producing another turn.
         const entryId = command.entryId as string;
         const sessionManager = this.inner.sessionManager;
         const currentSessionFile = this.inner.sessionFile;
@@ -804,6 +812,56 @@ export class AgentSessionWrapper {
           await this.shutdownAfterSessionReplacement("clone");
           return { cancelled: false, newSessionId };
         });
+      }
+
+      case "edit_message": {
+        const manager = this.inner.sessionManager;
+        const requestedId = typeof command.entryId === "string" ? command.entryId : null;
+        const entry = requestedId
+          ? manager.getEntry(requestedId)
+          : [...manager.getBranch()].reverse().find((item) => item.type === "message" && item.message.role === "user");
+        if (!entry || entry.type !== "message" || entry.message.role !== "user") {
+          throw new Error("User message is not available for editing yet");
+        }
+        if (!requestedId) {
+          if (typeof command.expectedText !== "string") throw new Error("Expected message text is required");
+          const text = typeof entry.message.content === "string" ? entry.message.content
+            : entry.message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+          if (text !== command.expectedText && skillExpansionToCommand(text) !== command.expectedText) {
+            throw new Error("The latest message changed; refresh before editing");
+          }
+        }
+        this.editingMessage = true;
+        try {
+          this.extensionUiAbortController.abort(new DOMException("Cancelled to edit a message", "AbortError"));
+          this.inner.clearQueue();
+          this.inner.abortBash();
+          await this.inner.abort();
+          // Include wrapper-owned preflight/extension prompts, not only SDK streaming.
+          const deadline = Date.now() + 30_000;
+          while (this.isSessionRunningForReplacement()) {
+            if (Date.now() >= deadline) throw new Error("The thread has not stopped yet; try editing again");
+            await new Promise((resolve) => setTimeout(resolve, 25));
+          }
+          this.inner.clearQueue();
+          await this.waitForExtensionsBound();
+          const result = await this.inner.navigateTree(entry.id, {});
+          if (result.cancelled) return { cancelled: true };
+          // SDK navigation is a no-op when the selected user entry is already
+          // the leaf (e.g. abort before any assistant output). Still rewind it.
+          if (manager.getLeafId() === entry.id) {
+            const state = this.inner.agent.state;
+            if (!state) throw new Error("Agent state is unavailable");
+            if (entry.parentId) manager.branch(entry.parentId);
+            else manager.resetLeaf();
+            state.messages = manager.buildSessionContext().messages;
+          }
+          invalidateSessionListCache();
+          return { cancelled: false, leafId: manager.getLeafId(), message: entry.message };
+        } finally {
+          this.editingMessage = false;
+          this.resetIdleTimer();
+        }
       }
 
       case "navigate_tree": {
