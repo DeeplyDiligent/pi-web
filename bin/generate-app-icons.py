@@ -58,14 +58,14 @@ for variant in ("", "-work"):
         draw.line(box((339, 362, 387, 362)), fill="white", width=6)
         draw.rounded_rectangle(box((360, 358, 366, 366)), radius=4, fill="white")
         artwork.paste(badge.resize(source.size, Image.Resampling.LANCZOS), (0, 0), badge.resize(source.size, Image.Resampling.LANCZOS))
-    artwork.save(ICONS / f"icon-blue-v1{variant}-maskable-512.png", optimize=True)
+    artwork.save(ICONS / f"icon-blue-v2{variant}-maskable-512.png", optimize=True)
     artwork.resize((180, 180), Image.Resampling.LANCZOS).save(
-        ICONS / f"apple-touch-icon-blue-v1{variant}.png", optimize=True
+        ICONS / f"apple-touch-icon-blue-v2{variant}.png", optimize=True
     )
     regular = artwork.convert("RGBA")
     regular.putalpha(rounding.resize(source.size, Image.Resampling.LANCZOS))
     for size in (192, 512):
         regular.resize((size, size), Image.Resampling.LANCZOS).save(
-            ICONS / f"icon-blue-v1{variant}-{size}.png", optimize=True
+            ICONS / f"icon-blue-v2{variant}-{size}.png", optimize=True
         )
 print("Generated plain and work PWA icons; artwork fits the Android maskable safe zone.")

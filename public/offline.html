@@ -74,7 +74,7 @@
   </head>
   <body>
     <main>
-      <img id="app-icon" src="/icons/icon-blue-v1-192.png" alt="" />
+      <img id="app-icon" src="/icons/icon-blue-v2-192.png" alt="" />
       <script>
         // Reuse the last fetched manifest offline, including the work badge.
         if ("caches" in window) {
@@ -82,7 +82,7 @@
             return response ? response.json() : null;
           }).then(function(manifest) {
             var icon = manifest && manifest.icons && manifest.icons[0];
-            if (icon && /^\/icons\/icon-blue-v1(?:-work)?-192\.png$/.test(icon.src)) {
+            if (icon && /^\/icons\/icon-blue-v2(?:-work)?-192\.png$/.test(icon.src)) {
               document.getElementById("app-icon").src = icon.src;
             }
           }).catch(function() {});

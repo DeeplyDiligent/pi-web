@@ -3,9 +3,9 @@
 export function getAppIcons(envType: string | undefined = process.env.ENV_TYPE) {
   const variant = envType === "work" ? "-work" : "";
   return {
-    icon192: `/icons/icon-blue-v1${variant}-192.png`,
-    icon512: `/icons/icon-blue-v1${variant}-512.png`,
-    maskable512: `/icons/icon-blue-v1${variant}-maskable-512.png`,
-    apple: `/icons/apple-touch-icon-blue-v1${variant}.png`,
+    icon192: `/icons/icon-blue-v2${variant}-192.png`,
+    icon512: `/icons/icon-blue-v2${variant}-512.png`,
+    maskable512: `/icons/icon-blue-v2${variant}-maskable-512.png`,
+    apple: `/icons/apple-touch-icon-blue-v2${variant}.png`,
   };
 }
