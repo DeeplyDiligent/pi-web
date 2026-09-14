@@ -4,12 +4,14 @@ import { createRequire } from "node:module";
 import test from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
+import * as themeModule from "../lib/theme.ts";
 
 const require = createRequire(import.meta.url);
 const hookSource = await readFile(new URL("./useTheme.ts", import.meta.url), "utf8");
 const layoutSource = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
 const componentSource = await readFile(new URL("../components/BrowserTheme.tsx", import.meta.url), "utf8");
-const bootstrap = layoutSource.match(/__html: `([^`]+)`/)[1];
+const bootstrap = themeModule.THEME_INIT_SCRIPT;
+const requireTheme = (name) => name === "@/lib/theme" ? themeModule : require(name);
 const compile = (source) => ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX },
 }).outputText;
@@ -20,7 +22,7 @@ function environment(preference, systemDark, storageThrows = false) {
   let darkClass = false;
   const context = vm.createContext({
     exports: {},
-    require,
+    require: requireTheme,
     localStorage: {
       getItem: () => {
         if (storageThrows) throw new Error("Storage unavailable");
@@ -30,7 +32,7 @@ function environment(preference, systemDark, storageThrows = false) {
     },
     window: { matchMedia: () => ({ matches: systemDark }) },
     document: {
-      documentElement: { style, classList: { toggle: (_, enabled) => { darkClass = enabled; } } },
+      documentElement: { style, dataset: {}, classList: { toggle: (_, enabled) => { darkClass = enabled; } } },
       querySelectorAll: () => assert.fail("Theme code must not mutate React-owned metadata"),
     },
   });
@@ -40,6 +42,7 @@ function environment(preference, systemDark, storageThrows = false) {
 for (const [preference, systemDark, expectedDark] of [
   ["light", true, false], ["dark", false, true], ["auto", true, true],
   ["auto", false, false], [null, true, true], ["invalid", true, true],
+  ["mist", true, false], ["rose", true, false], ["pine", false, true],
 ]) {
   test(`bootstrap and runtime agree for ${preference}, system dark=${systemDark}`, () => {
     const env = environment(preference, systemDark);
@@ -77,11 +80,14 @@ for (const [preference, media] of [
   ["auto", ["(prefers-color-scheme: light)", "(prefers-color-scheme: dark)"]],
   ["light", ["all", "not all"]],
   ["dark", ["not all", "all"]],
+  ["mist", ["all", "not all"]],
+  ["rose", ["all", "not all"]],
+  ["pine", ["not all", "all"]],
 ]) {
   test(`${preference} renders one unambiguous native theme-color pair`, () => {
     const context = {
       exports: {},
-      require: (name) => name === "@/hooks/useTheme" ? { useTheme: () => ({ preference }) } : require(name),
+      require: (name) => name === "@/hooks/useTheme" ? { useTheme: () => ({ preference }) } : requireTheme(name),
     };
     vm.runInNewContext(compile(componentSource), context);
     const tags = context.exports.BrowserTheme().props.children;
@@ -101,8 +107,9 @@ test("metadata has a single declarative owner, with no pre-hydration mutation", 
   assert.doesNotMatch(layoutSource, /themeColor\s*:/);
   assert.doesNotMatch(bootstrap, /theme-color/);
   assert.doesNotMatch(hookSource, /querySelectorAll|MutationObserver/);
-  assert.match(css, /:root \{\s*color-scheme: light;/);
-  assert.match(css, /html\.dark \{\s*color-scheme: dark;/);
+  assert.match(css, /:root,\s*\[data-theme="light"\] \{\s*color-scheme: light;/);
+  assert.match(css, /html\.dark,\s*\[data-theme="dark"\] \{\s*color-scheme: dark;/);
+  assert.match(layoutSource, /__html: THEME_INIT_SCRIPT/);
 });
 
 test("manifest does not pin Android's system bar to one colour", async () => {

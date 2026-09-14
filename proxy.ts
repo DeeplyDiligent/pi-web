@@ -9,7 +9,7 @@ import {
   PI_WEB_SESSION_COOKIE,
 } from "@/lib/web-auth";
 
-const PUBLIC_AUTH_PATHS = new Set(["/api/session", "/api/login", "/api/logout"]);
+const PUBLIC_AUTH_PATHS = new Set(["/api/session", "/api/login", "/api/logout", "/api/web-auth"]);
 
 export function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
@@ -39,4 +39,4 @@ export function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
-export const config = { matcher: ["/", "/api/:path*"] };
+export const config = { matcher: ["/", "/login", "/api/:path*"] };

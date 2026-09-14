@@ -129,6 +129,13 @@ test("does not interpret currency inside code or escaped dollars as math", () =>
   assert.match(html, /\$5 and \$10/);
 });
 
+test("renders backslash-escaped backticks inside inline code", () => {
+  const html = renderMarkdown("`AudioManager\\`1.cs`");
+
+  assert.match(html, /<code[^>]*>AudioManager`1\.cs<\/code>/);
+  assert.doesNotMatch(html, /<\/code>1\.cs`/);
+});
+
 test("renders LaTeX parenthesis delimiters as inline math", () => {
   const html = renderMarkdown(String.raw`射线为 \(r_c = K^{-1}p\)。`);
 

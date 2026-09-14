@@ -16,14 +16,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Expected a JSON request" }, { status: 415 });
   }
 
-  let body: { password?: unknown };
+  let body: { password?: unknown } | null;
   try {
     body = await request.json() as { password?: unknown };
   } catch {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }
 
-  if (!isValidWebPassword(body.password)) {
+  if (!isValidWebPassword(body?.password)) {
     return NextResponse.json(
       { error: "Incorrect password" },
       { status: 401, headers: { "Cache-Control": "no-store" } },
