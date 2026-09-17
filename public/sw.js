@@ -1,6 +1,6 @@
 const CACHE_PREFIX = "pi-web";
 // The offline page and icon precache changed without a package-version bump.
-const CACHE_VERSION = `${new URL(self.location.href).searchParams.get("v") || "dev"}-icons-blue-v1`;
+const CACHE_VERSION = `${new URL(self.location.href).searchParams.get("v") || "dev"}-icons-maroon-v2`;
 const STATIC_CACHE = `${CACHE_PREFIX}-static-${CACHE_VERSION}`;
 const OFFLINE_URL = "/offline.html";
 const PRECACHE_URLS = [
@@ -10,10 +10,10 @@ const PRECACHE_URLS = [
   "/icons/icon-blue-v1-512.png",
   "/icons/icon-blue-v1-maskable-512.png",
   "/icons/apple-touch-icon-blue-v1.png",
-  "/icons/icon-blue-v1-work-192.png",
-  "/icons/icon-blue-v1-work-512.png",
-  "/icons/icon-blue-v1-work-maskable-512.png",
-  "/icons/apple-touch-icon-blue-v1-work.png",
+  "/icons/icon-maroon-v2-work-192.png",
+  "/icons/icon-maroon-v2-work-512.png",
+  "/icons/icon-maroon-v2-work-maskable-512.png",
+  "/icons/apple-touch-icon-maroon-v2-work.png",
 ];
 
 self.addEventListener("install", (event) => {

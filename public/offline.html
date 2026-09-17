@@ -82,7 +82,7 @@
             return response ? response.json() : null;
           }).then(function(manifest) {
             var icon = manifest && manifest.icons && manifest.icons[0];
-            if (icon && /^\/icons\/icon-blue-v1(?:-work)?-192\.png$/.test(icon.src)) {
+            if (icon && /^\/icons\/(?:icon-blue-v1|icon-maroon-v2-work)-192\.png$/.test(icon.src)) {
               document.getElementById("app-icon").src = icon.src;
             }
           }).catch(function() {});
