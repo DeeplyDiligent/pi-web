@@ -1,19 +1,19 @@
 const CACHE_PREFIX = "pi-web";
 // The offline page and icon precache changed without a package-version bump.
-const CACHE_VERSION = `${new URL(self.location.href).searchParams.get("v") || "dev"}-icons-blue-v2`;
+const CACHE_VERSION = `${new URL(self.location.href).searchParams.get("v") || "dev"}-icons-maroon-v2`;
 const STATIC_CACHE = `${CACHE_PREFIX}-static-${CACHE_VERSION}`;
 const OFFLINE_URL = "/offline.html";
 const PRECACHE_URLS = [
   OFFLINE_URL,
   "/manifest.webmanifest",
-  "/icons/icon-blue-v2-192.png",
-  "/icons/icon-blue-v2-512.png",
-  "/icons/icon-blue-v2-maskable-512.png",
-  "/icons/apple-touch-icon-blue-v2.png",
-  "/icons/icon-blue-v2-work-192.png",
-  "/icons/icon-blue-v2-work-512.png",
-  "/icons/icon-blue-v2-work-maskable-512.png",
-  "/icons/apple-touch-icon-blue-v2-work.png",
+  "/icons/icon-blue-v1-192.png",
+  "/icons/icon-blue-v1-512.png",
+  "/icons/icon-blue-v1-maskable-512.png",
+  "/icons/apple-touch-icon-blue-v1.png",
+  "/icons/icon-maroon-v2-work-192.png",
+  "/icons/icon-maroon-v2-work-512.png",
+  "/icons/icon-maroon-v2-work-maskable-512.png",
+  "/icons/apple-touch-icon-maroon-v2-work.png",
 ];
 
 self.addEventListener("install", (event) => {
@@ -101,17 +101,17 @@ self.addEventListener("push", (event) => {
   const { title, body, url, tag } = payload;
   if (typeof title !== "string" || !title || typeof body !== "string" || !body) return;
 
-  // The in-page notification path handles the visible case (and plays the
-  // completion sound). Only surface a system notification when no window for
-  // this app is visible — e.g. a backgrounded iOS PWA.
+  // Always surface a system notification. iOS revokes the push subscription
+  // when a service worker handles a push without showing a notification, so
+  // suppressing the notification while a window is visible poisons the
+  // subscription in the background-delivery case. Notifications sharing a tag
+  // replace each other instead of stacking, so a visible window merely sees
+  // the completion notification re-appear.
   event.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
-      if (clients.some((client) => client.visibilityState === "visible")) return;
-      return self.registration.showNotification(title, {
-        body,
-        data: { url: typeof url === "string" && url ? url : "/" },
-        ...(typeof tag === "string" && tag ? { tag, renotify: true } : {}),
-      });
+    self.registration.showNotification(title, {
+      body,
+      data: { url: typeof url === "string" && url ? url : "/" },
+      ...(typeof tag === "string" && tag ? { tag, renotify: true } : {}),
     }),
   );
 });

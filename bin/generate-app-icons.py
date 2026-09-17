@@ -9,7 +9,8 @@ import math
 from PIL import Image, ImageDraw
 
 ICONS = Path(__file__).resolve().parent.parent / "public" / "icons"
-BACKGROUND = "#2563eb"
+PLAIN_BACKGROUND = "#2563eb"
+WORK_BACKGROUND = "#7f1d1d"
 SIZE = 512
 
 # Extract the original white pi, excluding the dark teal speech-bubble shape.
@@ -32,40 +33,63 @@ assert all(
     for y in range(SIZE) for x in range(SIZE) if mask.getpixel((x, y)) > 0
 ), "Pi mark must fit inside the maskable safe zone"
 
-full = Image.new("RGB", source.size, BACKGROUND)
-full.paste("white", mask=mask)
-
 # Non-maskable contexts get a rounded icon, while Android's maskable entry
 # supplies its own edge-to-edge background under the launcher's chosen shape.
 rounding = Image.new("L", (SIZE * 4, SIZE * 4))
 ImageDraw.Draw(rounding).rounded_rectangle(
     (0, 0, SIZE * 4 - 1, SIZE * 4 - 1), radius=SIZE * 4 * 0.22, fill=255
 )
-for variant in ("", "-work"):
-    artwork = full.copy()
-    if variant:
-        # Keep the bottom-right badge within Android's circular safe zone too.
-        cx, cy, radius = 363, 362, 43
-        assert math.hypot(cx - SIZE / 2, cy - SIZE / 2) + radius < SIZE * 0.4
-        badge = Image.new("RGBA", (SIZE * 4, SIZE * 4))
-        draw = ImageDraw.Draw(badge)
-        def box(coords):
-            return tuple(value * 4 for value in coords)
-        draw.ellipse(box((cx-radius, cy-radius, cx+radius, cy+radius)), fill="white", outline=BACKGROUND, width=12)
-        ink = "#1e3a8a"
-        draw.rounded_rectangle(box((351, 338, 375, 353)), radius=12, outline=ink, width=20)
-        draw.rounded_rectangle(box((338, 349, 388, 379)), radius=16, fill=ink)
-        draw.line(box((339, 362, 387, 362)), fill="white", width=6)
-        draw.rounded_rectangle(box((360, 358, 366, 366)), radius=4, fill="white")
-        artwork.paste(badge.resize(source.size, Image.Resampling.LANCZOS), (0, 0), badge.resize(source.size, Image.Resampling.LANCZOS))
-    artwork.save(ICONS / f"icon-blue-v2{variant}-maskable-512.png", optimize=True)
+
+def save_artwork(artwork, stem):
+    artwork.save(ICONS / f"{stem}-maskable-512.png", optimize=True)
     artwork.resize((180, 180), Image.Resampling.LANCZOS).save(
-        ICONS / f"apple-touch-icon-blue-v2{variant}.png", optimize=True
+        ICONS / f"apple-touch-{stem}.png", optimize=True
     )
     regular = artwork.convert("RGBA")
     regular.putalpha(rounding.resize(source.size, Image.Resampling.LANCZOS))
     for size in (192, 512):
         regular.resize((size, size), Image.Resampling.LANCZOS).save(
-            ICONS / f"icon-blue-v2{variant}-{size}.png", optimize=True
+            ICONS / f"{stem}-{size}.png", optimize=True
         )
-print("Generated plain and work PWA icons; artwork fits the Android maskable safe zone.")
+
+plain = Image.new("RGB", source.size, PLAIN_BACKGROUND)
+plain.paste("white", mask=mask)
+save_artwork(plain, "icon-blue-v1")
+
+# Give the work icon its own colour and pull the Pi slightly up and left so the
+# larger badge reads clearly instead of covering the lower-right leg.
+work_mark = mark.resize(
+    (round(mark.width * 0.92), round(mark.height * 0.92)),
+    Image.Resampling.LANCZOS,
+)
+work_mask = Image.new("L", source.size)
+work_mask.paste(
+    work_mark,
+    ((SIZE - work_mark.width) // 2 - 14, (SIZE - work_mark.height) // 2 - 14),
+)
+work = Image.new("RGB", source.size, WORK_BACKGROUND)
+work.paste("white", mask=work_mask)
+
+# Keep the enlarged bottom-right badge within Android's circular safe zone.
+cx, cy, radius = 350, 350, 62
+assert math.hypot(cx - SIZE / 2, cy - SIZE / 2) + radius < SIZE * 0.4
+badge = Image.new("RGBA", (SIZE * 4, SIZE * 4))
+draw = ImageDraw.Draw(badge)
+def box(coords):
+    return tuple(value * 4 for value in coords)
+draw.ellipse(
+    box((cx-radius, cy-radius, cx+radius, cy+radius)),
+    fill="white",
+    outline=WORK_BACKGROUND,
+    width=16,
+)
+ink = "#581313"
+draw.rounded_rectangle(box((332, 313, 368, 337)), radius=16, outline=ink, width=24)
+draw.rounded_rectangle(box((313, 331, 387, 377)), radius=20, fill=ink)
+draw.line(box((314, 351, 386, 351)), fill="white", width=8)
+draw.rounded_rectangle(box((345, 345, 355, 357)), radius=5, fill="white")
+badge = badge.resize(source.size, Image.Resampling.LANCZOS)
+work.paste(badge, (0, 0), badge)
+save_artwork(work, "icon-maroon-v2-work")
+
+print("Generated blue plain and maroon work PWA icons; artwork fits the Android maskable safe zone.")
