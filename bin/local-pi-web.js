@@ -3,9 +3,17 @@
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { spawn, spawnSync } = require("child_process");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const path = require("path");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { prepareSourceRelease } = require("./source-release");
 
 const tunnelName = process.env.PI_WEB_CLOUDFLARE_TUNNEL || "work-laptop-pi";
 const publicHostname = process.env.PI_WEB_PUBLIC_HOSTNAME || "work-laptop-pi.deepb.com.au";
+
+if (!process.env.ENV_TYPE) {
+  process.env.ENV_TYPE = "work";
+}
 
 if (!process.env.PI_WEB_ALLOWED_HOSTS) {
   process.env.PI_WEB_ALLOWED_HOSTS = publicHostname;
@@ -72,6 +80,13 @@ function ensureTunnel() {
   console.log(`Started Cloudflare tunnel "${tunnelName}".`);
 }
 
+// A registry-installed package already contains its matching production build.
+// A globally linked source checkout does not, so build/reuse an isolated,
+// content-addressed release rather than writing .next in the active checkout.
+const packageDir = process.argv.includes("--help") || process.argv.includes("-h")
+  ? path.join(__dirname, "..")
+  : prepareSourceRelease(path.join(__dirname, ".."));
+
 ensureTunnel();
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-require("./pi-web");
+require(path.join(packageDir, "bin", "pi-web"));
