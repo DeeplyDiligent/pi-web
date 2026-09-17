@@ -8,7 +8,7 @@ export function POST() {
     value: "",
     httpOnly: true,
     secure: true,
-    sameSite: "strict",
+    sameSite: "lax",
     path: "/",
     maxAge: 0,
   });

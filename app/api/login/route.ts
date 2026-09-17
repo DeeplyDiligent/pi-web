@@ -36,7 +36,7 @@ export async function POST(request: Request) {
     value: createSessionToken(),
     httpOnly: true,
     secure: true,
-    sameSite: "strict",
+    sameSite: "lax",
     path: "/",
     maxAge: PI_WEB_SESSION_MAX_AGE_SECONDS,
   });

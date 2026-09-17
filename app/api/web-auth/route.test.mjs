@@ -49,7 +49,7 @@ test("logs in with one password and reports the signed session", async () => {
   assert.match(cookie, /HttpOnly/i);
   assert.match(cookie, /; Secure/i);
   assert.match(cookie, /Max-Age=604800/i);
-  assert.match(cookie, /SameSite=strict/i);
+  assert.match(cookie, /SameSite=Lax/i);
   assert.match(cookie, /Path=\//i);
 
   const cookiePair = cookie.split(";", 1)[0];
