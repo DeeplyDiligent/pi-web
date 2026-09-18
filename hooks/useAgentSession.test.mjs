@@ -144,6 +144,23 @@ test("fresh sessions use the preference while persisted and live sessions restor
   assert.doesNotMatch(loadToolsSource, /setPreferredToolPreset/);
 });
 
+test("only the session-mount load probes disk for external appends", () => {
+  const loadSessionSource = source.slice(
+    source.indexOf("  const loadSession = useCallback"),
+    source.indexOf("  const loadContext = useCallback"),
+  );
+  const mountSource = source.slice(
+    source.indexOf("// Load session on mount"),
+    source.indexOf("sessionHookMountedRef.current = false"),
+  );
+  assert.match(loadSessionSource, /options\?: \{ force\?: boolean; strict\?: boolean \}/);
+  assert.match(loadSessionSource, /if \(options\?\.force\) params\.set\("force", "1"\)/);
+  assert.match(loadSessionSource, /d\.wrapperRebuilt[\s\S]*?eventConnectionRef\.current\?\.close\(\)[\s\S]*?maintain\(sid\)/);
+  assert.match(mountSource, /loadSession\(session\.id, true, true, \{ force: true \}\)/);
+  assert.match(source, /await loadSession\(sid\)/);
+  assert.equal([...source.matchAll(/\{ force: true \}/g)].length, 1);
+});
+
 test("first user messages remain editable while forks use completed assistant responses", () => {
   const editSource = source.slice(
     source.indexOf("  const handleEdit = useCallback"),
@@ -153,7 +170,7 @@ test("first user messages remain editable while forks use completed assistant re
   assert.match(chatWindowSource, /onEdit=\{msg\.role === "user" && \(entryIds\[idx\] \|\| idx === lastUserIdx\)/);
   assert.doesNotMatch(chatWindowSource, /idx === 0 && msg\.role === "user"|prevAssistantEntryId/);
   assert.match(editSource, /type: "edit_message", entryId, expectedText/);
-  assert.match(editSource, /await loadSession\(sid, false, false, true\)/);
+  assert.match(editSource, /await loadSession\(sid, false, false, \{ strict: true \}\)/);
 });
 
 test("an empty persisted session displays the model it will use on first send", () => {
