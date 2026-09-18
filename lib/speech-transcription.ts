@@ -10,7 +10,11 @@ const MODEL_ALIASES = [
   "nemotron-speech-streaming-en-0.6b",
 ] as const;
 const MODEL_INFO_FILE = "foundry.modelinfo.json";
-const CORE_DLL = "Microsoft.AI.Foundry.Local.Core.dll";
+const CORE_LIBRARY_FILENAME = process.platform === "win32"
+  ? "Microsoft.AI.Foundry.Local.Core.dll"
+  : process.platform === "darwin"
+    ? "Microsoft.AI.Foundry.Local.Core.dylib"
+    : "Microsoft.AI.Foundry.Local.Core.so";
 const APP_NAME = "pi-web-speech";
 const STREAM_CHUNK_BYTES = 32 * 1024;
 // Reclaim abandoned microphones, not long recordings. PCM uploads (including
@@ -82,7 +86,9 @@ function compareVersionsDescending(a: string, b: string): number {
 function resolveFoundryLibrary(): string | undefined {
   const configured = process.env.PI_WEB_FOUNDRY_LIBRARY_PATH;
   if (configured) {
-    const library = configured.toLowerCase().endsWith(".dll") ? configured : join(configured, CORE_DLL);
+    const lower = configured.toLowerCase();
+    const isLibraryFile = lower.endsWith(".dll") || lower.endsWith(".so") || lower.endsWith(".dylib");
+    const library = isLibraryFile ? configured : join(configured, CORE_LIBRARY_FILENAME);
     if (!existsSync(library)) throw new Error(`Foundry Local runtime was not found: ${library}`);
     return library;
   }
@@ -91,7 +97,7 @@ function resolveFoundryLibrary(): string | undefined {
   const runtimeRoot = join(process.env.APPDATA, "Code", "chatDictationRuntime");
   if (!existsSync(runtimeRoot)) return undefined;
   for (const version of readdirSync(runtimeRoot).sort(compareVersionsDescending)) {
-    const library = join(runtimeRoot, version, "foundry-local-core", `win32-${process.arch}`, CORE_DLL);
+    const library = join(runtimeRoot, version, "foundry-local-core", `win32-${process.arch}`, CORE_LIBRARY_FILENAME);
     if (existsSync(library)) return library;
   }
   return undefined;
