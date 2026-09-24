@@ -25,6 +25,7 @@ import { useIsMobile, useIsNarrowMobile } from "@/hooks/useIsMobile";
 import { useViewportHeight } from "@/hooks/useViewportHeight";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { useAudio } from "@/hooks/useAudio";
+import { useSpeechSynthesis } from "@/hooks/useSpeechSynthesis";
 import { copyText } from "@/lib/clipboard";
 import { sendAgentCommand } from "@/lib/agent-client";
 import { getFileName } from "@/lib/file-paths";
@@ -103,6 +104,7 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
   // also fire for tasks finishing in a non-active workspace whose ChatWindow
   // is not mounted. ChatWindow receives the audio callbacks as props.
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio, soundEnabledRef } = useAudio();
+  const { autoReadEnabled, setAutoReadEnabled, speechSynthesisSupported, speakResponse, speakingKey: speakingResponseKey } = useSpeechSynthesis(locale);
   const [quoteSelectionEnabled, setQuoteSelectionEnabled] = useState(false);
   useEffect(() => {
     try {
@@ -2510,6 +2512,10 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
               onSoundToggle={onSoundToggle}
               playDoneSound={playDoneSound}
               unlockAudio={unlockAudio}
+              autoReadEnabled={autoReadEnabled}
+              speechSynthesisSupported={speechSynthesisSupported}
+              speakingResponseKey={speakingResponseKey}
+              onSpeakResponse={speakResponse}
             />
           ) : initialCwdStatus === "validating" ? (
             <div
@@ -2690,6 +2696,9 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
         initialSection={settingsSection}
         quoteSelectionEnabled={quoteSelectionEnabled}
         onQuoteSelectionChange={handleQuoteSelectionChange}
+        autoReadEnabled={autoReadEnabled}
+        onAutoReadChange={setAutoReadEnabled}
+        speechSynthesisSupported={speechSynthesisSupported}
         onClose={() => {
           setSettingsSection(null);
           setModelsRefreshKey((key) => key + 1);

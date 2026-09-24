@@ -205,6 +205,10 @@ interface Props {
    * final answer text-only.
    */
   writtenFiles?: WrittenFile[];
+  /** Present only for a completed, user-visible assistant response. */
+  onSpeak?: (text: string, key: string) => void;
+  speechKey?: string;
+  isSpeaking?: boolean;
 }
 
 export function getModelDisplayName(
@@ -272,12 +276,12 @@ function haveSameRelevantToolResults(
   return true;
 }
 
-export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onOpenSession, entryId, searchBlock, onFork, forking, onEdit, editing, showTimestamp, prevTimestamp, sessionId, writtenFiles }: Props) {
+export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onOpenSession, entryId, searchBlock, onFork, forking, onEdit, editing, showTimestamp, prevTimestamp, sessionId, writtenFiles, onSpeak, speechKey, isSpeaking }: Props) {
   if (message.role === "user") {
     return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onEdit={onEdit} editing={editing} />;
   }
   if (message.role === "assistant") {
-    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onOpenSession={onOpenSession} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} searchBlock={searchBlock} writtenFiles={writtenFiles} onFork={onFork} forking={forking} />;
+    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onOpenSession={onOpenSession} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} searchBlock={searchBlock} writtenFiles={writtenFiles} onFork={onFork} forking={forking} onSpeak={onSpeak} speechKey={speechKey} isSpeaking={isSpeaking} />;
   }
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
@@ -310,7 +314,10 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.showTimestamp === next.showTimestamp
     && prev.prevTimestamp === next.prevTimestamp
     && prev.writtenFiles === next.writtenFiles
-    && prev.sessionId === next.sessionId;
+    && prev.sessionId === next.sessionId
+    && prev.onSpeak === next.onSpeak
+    && prev.speechKey === next.speechKey
+    && prev.isSpeaking === next.isSpeaking;
 });
 
 function UserMessageView({ message, cwd, onOpenFile, entryId, onEdit, editing }: {
@@ -573,6 +580,9 @@ function AssistantMessageView({
   writtenFiles,
   onFork,
   forking,
+  onSpeak,
+  speechKey,
+  isSpeaking,
 }: {
   message: AssistantMessage;
   onFork?: (entryId: string) => void;
@@ -589,6 +599,9 @@ function AssistantMessageView({
   entryId?: string;
   searchBlock?: AssistantContentBlock;
   writtenFiles?: WrittenFile[];
+  onSpeak?: (text: string, key: string) => void;
+  speechKey?: string;
+  isSpeaking?: boolean;
 }) {
   const { t } = useI18n();
   const time = showTimestamp ? formatTime(message.timestamp) : null;
@@ -819,6 +832,30 @@ function AssistantMessageView({
           <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
             {formatUsage(message.usage)}
           </div>
+        )}
+        {textContent && !isStreaming && onSpeak && speechKey && (
+          <button
+            type="button"
+            onClick={() => onSpeak(textContent, speechKey)}
+            aria-label={t(isSpeaking ? "i18n.stopReading" : "i18n.readAloud")}
+            title={t(isSpeaking ? "i18n.stopReading" : "i18n.readAloud")}
+            aria-pressed={isSpeaking}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 26, height: 22, padding: 0,
+              background: "none", border: "none", borderRadius: 5,
+              color: isSpeaking ? "var(--accent)" : "var(--text-dim)",
+              cursor: "pointer",
+            }}
+            onMouseEnter={(event) => { event.currentTarget.style.color = "var(--accent)"; }}
+            onMouseLeave={(event) => { event.currentTarget.style.color = isSpeaking ? "var(--accent)" : "var(--text-dim)"; }}
+          >
+            {isSpeaking ? (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
+            ) : (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.5 5.5a9 9 0 0 1 0 13" /></svg>
+            )}
+          </button>
         )}
         {textContent && !isStreaming && (
           <button

@@ -24,6 +24,7 @@ import type { SessionStatsInfo } from "@/lib/pi-types";
 import type { AppUpdateResponse } from "@/lib/api-types";
 import type { ToolEntry } from "@/lib/tool-presets";
 import { findChatScrollAnchor, type ChatScrollPosition } from "@/lib/chat-scroll-position";
+import { getAssistantSpeechText } from "@/lib/speech-text";
 import {
   captureScrollDistance,
   getPromptAnchorSpacerHeight,
@@ -68,6 +69,10 @@ interface Props {
   onSoundToggle?: () => void;
   playDoneSound?: () => void;
   unlockAudio?: () => void;
+  autoReadEnabled?: boolean;
+  speechSynthesisSupported?: boolean;
+  speakingResponseKey?: string | null;
+  onSpeakResponse?: (text: string, key: string, onComplete?: () => void) => void;
 }
 
 function phaseLabel(phase: AgentPhase, t: (key: string, params?: Record<string, string | number>) => string): string | null {
@@ -242,7 +247,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
   );
 }
 
-export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onExtensionStatusesChange, onOpenFile, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
+export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onExtensionStatusesChange, onOpenFile, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, autoReadEnabled = false, speechSynthesisSupported = false, speakingResponseKey = null, onSpeakResponse }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const completionNotificationsEnabled = session?.relation?.kind !== "subagent";
@@ -256,9 +261,20 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   const soundEnabledRef = useRef(soundEnabled);
   soundEnabledRef.current = soundEnabled;
   const soundedExtensionDialogIdRef = useRef<string | null>(null);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+  const [autoReadRequest, setAutoReadRequest] = useState(0);
+  const autoReadEnabledRef = useRef(autoReadEnabled);
+  autoReadEnabledRef.current = autoReadEnabled;
   const wrappedOnAgentEnd = useCallback(() => {
     if (completionNotificationsEnabled && soundEnabledRef.current) {
       playDoneSoundRef.current();
+    }
+    if (completionNotificationsEnabled && autoReadEnabledRef.current) {
+      setAutoReadRequest((request) => request + 1);
     }
     onAgentEnd?.();
   }, [completionNotificationsEnabled, onAgentEnd]);
@@ -303,6 +319,50 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     deferInitialScroll: Boolean(pendingScrollRestore),
   });
   const sessionBusy = agentRunning || bashRunning || editingMessage;
+  const handledAutoReadRequestRef = useRef(0);
+  const lastAutoReadKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      handledAutoReadRequestRef.current === autoReadRequest
+      || !autoReadEnabled
+      || !speechSynthesisSupported
+      || !onSpeakResponse
+      || agentRunning
+      || streamState.isStreaming
+    ) return;
+
+    let latestUserIndex = -1;
+    for (let index = messages.length - 1; index >= 0; index--) {
+      if (messages[index].role === "user") {
+        latestUserIndex = index;
+        break;
+      }
+    }
+    let finalAssistantIndex = -1;
+    for (let index = messages.length - 1; index > latestUserIndex; index--) {
+      if (messages[index].role === "assistant") {
+        finalAssistantIndex = index;
+        break;
+      }
+    }
+    // The terminal message may arrive just before the persisted messages have
+    // been reloaded. Wait for a response after the latest user message rather
+    // than accidentally reading the preceding turn.
+    if (finalAssistantIndex < 0) return;
+
+    const message = messages[finalAssistantIndex] as AssistantMessage;
+    const answer = withAssistantBlocks(message, splitFinalAssistantBlocks(message).answerBlocks);
+    const text = getAssistantSpeechText(answer);
+    handledAutoReadRequestRef.current = autoReadRequest;
+    if (!text) return;
+    const key = `${session?.id ?? sessionIdRef.current ?? "new"}:${entryIds[finalAssistantIndex] ?? message.timestamp ?? finalAssistantIndex}`;
+    if (lastAutoReadKeyRef.current === key) return;
+    lastAutoReadKeyRef.current = key;
+    onSpeakResponse(text, key, () => {
+      if (mountedRef.current && autoReadEnabledRef.current) chatInputRef?.current?.startSpeechRecording();
+    });
+  }, [agentRunning, autoReadEnabled, autoReadRequest, chatInputRef, entryIds, messages, onSpeakResponse, session?.id, sessionIdRef, speechSynthesisSupported, streamState.isStreaming]);
+
   const handleEditMessage = useCallback(async (entryId: string | null, message: UserMessage) => {
     const editable = await handleEdit(entryId, message);
     if (editable) handleEditContent(editable);
@@ -730,7 +790,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   useEffect(() => () => { onContextUsageChange?.(null); }, [onContextUsageChange]);
 
   const onDrop = useCallback((files: File[]) => {
-    chatInputRef?.current?.addImages(files);
+    chatInputRef?.current?.addAttachments(files);
   }, [chatInputRef]);
 
   const { isDragOver, handleDragEnter, handleDragOver, handleDragLeave, handleDrop } = useDragDrop(onDrop);
@@ -1060,6 +1120,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                   }
                 }
                 if (options.showTimestamp !== undefined) showTimestamp = options.showTimestamp;
+                const responseSpeechKey = `${session?.id ?? sessionIdRef.current ?? "new"}:${entryIds[idx] ?? (msg as AgentMessage & { timestamp?: number }).timestamp ?? idx}`;
+                const canSpeakResponse = speechSynthesisSupported && Boolean(onSpeakResponse) && msg.role === "assistant" && showTimestamp && keyPrefix !== "process";
                 const view = (
                   <MessageView
                     key={`${keyPrefix}-view-${messageKey}`}
@@ -1080,6 +1142,9 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                     prevTimestamp={idx > 0 ? (messages[idx - 1] as AgentMessage & { timestamp?: number }).timestamp : undefined}
                     sessionId={session?.id ?? sessionIdRef.current ?? undefined}
                     writtenFiles={options.writtenFiles}
+                    onSpeak={canSpeakResponse ? onSpeakResponse : undefined}
+                    speechKey={canSpeakResponse ? responseSpeechKey : undefined}
+                    isSpeaking={canSpeakResponse && speakingResponseKey === responseSpeechKey}
                   />
                 );
                 if (!isVisible || currentRefIdx === undefined) return view;

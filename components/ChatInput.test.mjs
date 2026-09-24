@@ -11,7 +11,7 @@ const jiti = createJiti(import.meta.url, {
 });
 const React = await jiti.import("react");
 const { renderToStaticMarkup } = await jiti.import("react-dom/server");
-const { ChatInput, ModelErrorBanner, ModelScopeWarningBanner, canClearBuiltinCommandInput, canRestoreUserMessage, canRunBuiltinSlashCommandWhileStreaming, compressImageFile, cycleListIndex, filterModelOptions, getUpwardMenuMaxHeight, getUserMessageText, getUserMessageDraftImages, isExactSlashCommand, modelSupportsImageInput, replaceLinksWithMarkdown, shouldCompressImageFile } = await jiti.import("./ChatInput.tsx");
+const { ChatInput, ModelErrorBanner, ModelScopeWarningBanner, appendTemporaryAttachmentPaths, canClearBuiltinCommandInput, canRestoreUserMessage, canRunBuiltinSlashCommandWhileStreaming, compressImageFile, cycleListIndex, filterModelOptions, getUpwardMenuMaxHeight, getUserMessageText, getUserMessageDraftImages, isExactSlashCommand, modelSupportsImageInput, replaceLinksWithMarkdown, shouldCompressImageFile } = await jiti.import("./ChatInput.tsx");
 const { ModelSelector } = await jiti.import("./ModelSelector.tsx");
 const { clearDraft, getDraft, mergeRestoredSubmissionDraft, mergeRestoredSubmissionText, rekeyDraft, setDraft } = await jiti.import("@/lib/draft-store.ts");
 const { I18nProvider } = await jiti.import("@/hooks/useI18n");
@@ -170,7 +170,24 @@ test("shows the follow-up shortcut in the button tooltip", () => {
   assert.match(html, /aria-keyshortcuts="Alt\+Enter"/);
 });
 
-test("renders speech before image attachment in the shared composer toolbar", () => {
+test("voice input can be submitted while recording", () => {
+  const source = readFileSync(new URL("./ChatInput.tsx", import.meta.url), "utf8");
+  assert.match(source, /if \(speechStatus === "recording"\) \{\s*void finishSpeechRecording\(true\)/);
+  assert.match(source, /else if \(sendAfterTranscription\) \{\s*await handleSend\(completedMessage\)/);
+  assert.match(source, /attachmentUploadCount > 0 \|\| speechStatus === "transcribing" \|\| \(speechStatus === "idle" && !value\.trim\(\) && !attachedImages\.length\)/);
+  assert.match(source, /startSpeechRecording\(\) \{\s*void startSpeechRecordingRef\.current\(\)/);
+});
+
+test("formats temporary attachment paths for the agent without replacing typed text", () => {
+  assert.equal(
+    appendTemporaryAttachmentPaths("Review these", ["/tmp/pi-web-attachments-a/report one.pdf", "/tmp/data.csv"]),
+    "Review these\nAttached file: \"/tmp/pi-web-attachments-a/report one.pdf\"\nAttached file: \"/tmp/data.csv\"",
+  );
+  assert.equal(appendTemporaryAttachmentPaths("", ["/tmp/data.csv"]), "Attached file: \"/tmp/data.csv\"");
+  assert.equal(appendTemporaryAttachmentPaths("unchanged", []), "unchanged");
+});
+
+test("renders speech before the general attachment button in the shared composer toolbar", () => {
   for (const isStreaming of [false, true]) {
     const html = renderToStaticMarkup(
       React.createElement(I18nProvider, null, React.createElement(ChatInput, {
@@ -178,10 +195,11 @@ test("renders speech before image attachment in the shared composer toolbar", ()
       })),
     );
     const mic = html.indexOf('class="chat-composer-mic"');
-    const picture = html.indexOf('class="chat-composer-attachment"');
-    assert.ok(mic >= 0 && picture > mic, "speech comes first in visual and keyboard order");
-    assert.match(html.slice(mic, picture), /aria-label="Start voice input"/);
-    assert.match(html.slice(picture), /title="Attach image"/);
+    const attachment = html.indexOf('class="chat-composer-attachment"');
+    assert.ok(mic >= 0 && attachment > mic, "speech comes first in visual and keyboard order");
+    assert.match(html.slice(mic, attachment), /aria-label="Start voice input"/);
+    assert.match(html.slice(attachment), /title="Attach files"/);
+    assert.match(html.slice(attachment), /aria-label="Attach files"/);
   }
 });
 

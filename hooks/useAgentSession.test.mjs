@@ -426,6 +426,13 @@ test("reconnects active shell output to its streaming tool call", () => {
   assert.match(chatWindowSource, /<MessageView message=\{streamState\.streamingMessage as AgentMessage\} toolResults=\{toolResultsMap\}/);
 });
 
+test("auto-read hands off to voice input only after completed response speech", () => {
+  assert.match(chatWindowSource, /onSpeakResponse\(text, key, \(\) => \{/);
+  assert.match(chatWindowSource, /autoReadEnabledRef\.current\) chatInputRef\?\.current\?\.startSpeechRecording\(\)/);
+  assert.match(chatWindowSource, /message\.role !== "assistant"/);
+  assert.match(chatWindowSource, /splitFinalAssistantBlocks\(message\)\.answerBlocks/);
+});
+
 test("plays the enabled sound once for each extension dialog", () => {
   assert.match(chatWindowSource, /soundedExtensionDialogIdRef = useRef<string \| null>\(null\)/);
   assert.match(

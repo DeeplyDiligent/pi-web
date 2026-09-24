@@ -97,9 +97,10 @@ export interface ChatInputHandle {
   insertIfEmpty: (text: string) => void;
   replaceMessage: (message: UserMessage) => void;
   prependText: (text: string) => void;
-  addImages: (files: File[]) => void;
+  addAttachments: (files: File[]) => void;
   rekeyDraft: (previousKey: string, nextKey: string) => void;
   restoreSubmission: (text: string, images?: ChatDraftImage[], targetDraftKey?: string) => void;
+  startSpeechRecording: () => void;
 }
 
 const TOOL_PRESETS = ["chat-only", "read-only", "default", "full"] as const;
@@ -147,6 +148,13 @@ export function replaceLinksWithMarkdown(
   }
 
   return replaced ? result + text.slice(searchFrom) : null;
+}
+
+export function appendTemporaryAttachmentPaths(text: string, paths: string[]): string {
+  if (paths.length === 0) return text;
+  const references = paths.map((filePath) => `Attached file: ${JSON.stringify(filePath)}`).join("\n");
+  if (!text) return references;
+  return `${text}${/\s$/.test(text) ? "" : "\n"}${references}`;
 }
 
 function getVisibleTopBoundary(element: HTMLElement): number {
@@ -577,6 +585,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [value, setValue] = useState(() => (draftKey ? getDraft(draftKey)?.value ?? "" : ""));
   const [speechStatus, setSpeechStatus] = useState<"idle" | "starting" | "recording" | "transcribing">("idle");
   const [speechError, setSpeechError] = useState<string | null>(null);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [attachmentUploadCount, setAttachmentUploadCount] = useState(0);
   const [speechCommitted, setSpeechCommitted] = useState("");
   const [speechPreview, setSpeechPreview] = useState("");
   const [speechLevel, setSpeechLevel] = useState(0);
@@ -644,6 +654,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const speechPressStartedAtRef = useRef(0);
   const speechWasActiveOnPressRef = useRef(false);
   const speechStopRequestedRef = useRef(false);
+  const speechSendRequestedRef = useRef(false);
+  const startSpeechRecordingRef = useRef<() => Promise<void>>(async () => {});
   const speechRangeRef = useRef<{ start: number; end: number } | null>(null);
   const speechPreviewRef = useRef<HTMLSpanElement>(null);
   valueRef.current = value;
@@ -825,8 +837,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
       });
     },
-    addImages(files: File[]) {
-      processImageFiles(files);
+    addAttachments(files: File[]) {
+      void processAttachmentFiles(files);
+    },
+    startSpeechRecording() {
+      void startSpeechRecordingRef.current();
     },
   }));
 
@@ -859,6 +874,51 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       pendingImageCountRef.current -= imageFiles.length;
     }
   }, [compact]);
+
+  const processAttachmentFiles = useCallback(async (files: File[]) => {
+    if (compact || files.length === 0) return;
+    setAttachmentError(null);
+
+    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+    const otherFiles = files.filter((file) => !file.type.startsWith("image/"));
+    if (imageFiles.length > 0) void processImageFiles(imageFiles);
+    if (otherFiles.length === 0) return;
+
+    setAttachmentUploadCount((count) => count + 1);
+    try {
+      const formData = new FormData();
+      for (const file of otherFiles) formData.append("files", file);
+      const response = await fetch("/api/attachments", { method: "POST", body: formData });
+      const result = await response.json().catch(() => null) as {
+        attachments?: Array<{ path: string }>;
+        error?: string;
+      } | null;
+      if (!response.ok || !result?.attachments) {
+        throw new Error(result?.error || `Upload failed (${response.status})`);
+      }
+
+      const nextValue = appendTemporaryAttachmentPaths(
+        valueRef.current,
+        result.attachments.map((attachment) => attachment.path),
+      );
+      valueRef.current = nextValue;
+      setValue(nextValue);
+      setHistoryMenuOpen(false);
+      setAtQuery(null);
+      requestAnimationFrame(() => {
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+        textarea.focus();
+        textarea.setSelectionRange(nextValue.length, nextValue.length);
+        textarea.style.height = "auto";
+        textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+      });
+    } catch (error) {
+      setAttachmentError(error instanceof Error ? error.message : t("chat.attachmentUploadFailed"));
+    } finally {
+      setAttachmentUploadCount((count) => Math.max(0, count - 1));
+    }
+  }, [compact, processImageFiles, t]);
 
   const removeImage = useCallback((index: number) => {
     setAttachedImages((prev) => {
@@ -970,8 +1030,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     }
   }, [attachedImages.length, clearInput, onBuiltinCommand]);
 
-  const handleSend = useCallback(async () => {
-    const msg = value.trim();
+  const handleSend = useCallback(async (messageOverride?: string) => {
+    if (attachmentUploadCount > 0) return;
+    const msg = (messageOverride ?? value).trim();
     if (!msg && !attachedImages.length) return;
     onAudioUnlock?.();
     const builtinAllowed = !isStreaming || canRunBuiltinSlashCommandWhileStreaming(msg);
@@ -979,7 +1040,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     if (isStreaming) return;
     clearInput();
     onSend(msg, attachedImages.length ? attachedImages : undefined);
-  }, [value, attachedImages, isStreaming, runBuiltinCommand, onSend, clearInput, onAudioUnlock]);
+  }, [attachmentUploadCount, value, attachedImages, isStreaming, runBuiltinCommand, onSend, clearInput, onAudioUnlock]);
 
   const slashQuery = !compact && value.startsWith("/") && !/\s/.test(value.slice(1))
     ? value.slice(1).toLowerCase()
@@ -1014,7 +1075,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     ? t(slashQuery ? "chat.match" : "chat.command")
     : t(slashQuery ? "chat.matches" : "chat.commands", { count: filteredSlashCommands.length });
   const hasInputText = Boolean(value.trim());
-  const canQueueStreamingMessage = hasInputText || attachedImages.length > 0;
+  const canQueueStreamingMessage = attachmentUploadCount === 0 && (hasInputText || attachedImages.length > 0);
   // Warn when images are attached but the selected model is known not to accept
   // image input (#584), including a resolved default. Unknown models stay silent.
   const showImageUnsupportedWarning = (
@@ -1038,10 +1099,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     setAtQuery(extractAtQuery(text.slice(0, pos)));
   }, [cwd]);
 
-  const applySpeechTranscript = useCallback((transcript: string) => {
+  const applySpeechTranscript = useCallback((transcript: string): string | null => {
     const text = transcript.trim();
     const range = speechRangeRef.current;
-    if (!text || !range) return;
+    if (!text || !range) return null;
     const current = valueRef.current;
     const before = current.slice(0, range.start);
     const after = current.slice(range.end);
@@ -1062,6 +1123,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       input.style.height = "auto";
       input.style.height = `${Math.min(input.scrollHeight, 200)}px`;
     });
+    return next;
   }, [updateAtQuery]);
 
   const queueSpeechAudio = useCallback((sessionId: string, pcm: Uint8Array) => {
@@ -1086,7 +1148,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     speechElapsedTimerRef.current = null;
   }, []);
 
-  const finishSpeechRecording = useCallback(async () => {
+  const finishSpeechRecording = useCallback(async (sendAfterTranscription = false) => {
     const recorder = speechRecorderRef.current;
     const sessionId = speechSessionIdRef.current;
     if (!recorder || !sessionId) return;
@@ -1103,8 +1165,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       const result = await response.json() as { text?: string; error?: string };
       if (!response.ok) throw new Error(result.error || `Transcription failed (${response.status})`);
       if (generation !== speechGenerationRef.current) return;
-      if (result.text) applySpeechTranscript(result.text);
-      else setSpeechError(t("chat.speechNotRecognized"));
+      const completedMessage = result.text ? applySpeechTranscript(result.text) : null;
+      if (!completedMessage) {
+        setSpeechError(t("chat.speechNotRecognized"));
+      } else if (sendAfterTranscription) {
+        await handleSend(completedMessage);
+      }
     } catch (error) {
       if (generation === speechGenerationRef.current) {
         setSpeechError(error instanceof Error ? error.message : t("chat.speechFailed"));
@@ -1116,6 +1182,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       speechSessionIdRef.current = null;
       speechRangeRef.current = null;
       speechStopRequestedRef.current = false;
+      speechSendRequestedRef.current = false;
       if (generation === speechGenerationRef.current) {
         setSpeechStatus("idle");
         setSpeechCommitted("");
@@ -1124,7 +1191,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         setSpeechElapsedSeconds(0);
       }
     }
-  }, [applySpeechTranscript, clearSpeechTimers, queueSpeechAudio, t]);
+  }, [applySpeechTranscript, clearSpeechTimers, handleSend, queueSpeechAudio, t]);
 
   const startSpeechRecording = useCallback(async () => {
     if (speechStatus !== "idle") return;
@@ -1136,6 +1203,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     setSpeechLevel(0);
     setSpeechElapsedSeconds(0);
     speechStopRequestedRef.current = false;
+    speechSendRequestedRef.current = false;
     speechUploadRef.current = Promise.resolve();
     const input = textareaRef.current;
     const start = input?.selectionStart ?? valueRef.current.length;
@@ -1185,13 +1253,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         setSpeechElapsedSeconds((seconds) => seconds + 1);
       }, 1000);
       setSpeechStatus("recording");
-      if (speechStopRequestedRef.current) void finishSpeechRecording();
+      if (speechStopRequestedRef.current) void finishSpeechRecording(speechSendRequestedRef.current);
     } catch (error) {
       clearSpeechTimers();
       await speechRecorderRef.current?.cancel();
       speechRecorderRef.current = null;
       speechRangeRef.current = null;
       speechStopRequestedRef.current = false;
+      speechSendRequestedRef.current = false;
       if (generation === speechGenerationRef.current) {
         setSpeechStatus("idle");
         setSpeechCommitted("");
@@ -1202,6 +1271,20 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       }
     }
   }, [clearSpeechTimers, finishSpeechRecording, queueSpeechAudio, speechStatus, t]);
+  startSpeechRecordingRef.current = startSpeechRecording;
+
+  const handleSpeechAwareSend = useCallback(() => {
+    if (speechStatus === "recording") {
+      void finishSpeechRecording(true);
+      return;
+    }
+    if (speechStatus === "starting") {
+      speechSendRequestedRef.current = true;
+      speechStopRequestedRef.current = true;
+      return;
+    }
+    if (speechStatus === "idle") void handleSend();
+  }, [finishSpeechRecording, handleSend, speechStatus]);
 
   const cancelSpeechRecording = useCallback(() => {
     speechGenerationRef.current += 1;
@@ -1216,6 +1299,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     speechRecorderRef.current = null;
     speechRangeRef.current = null;
     speechStopRequestedRef.current = false;
+    speechSendRequestedRef.current = false;
     setSpeechStatus("idle");
     setSpeechCommitted("");
     setSpeechPreview("");
@@ -1670,11 +1754,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = Array.from(e.clipboardData?.items ?? []);
-    const imageItems = items.filter((item) => item.type.startsWith("image/"));
-    if (!compact && imageItems.length) {
+    const fileItems = items.filter((item) => item.kind === "file");
+    if (!compact && fileItems.length) {
       e.preventDefault();
-      const files = imageItems.map((item) => item.getAsFile()).filter((f): f is File => f !== null);
-      processImageFiles(files);
+      const files = fileItems.map((item) => item.getAsFile()).filter((file): file is File => file !== null);
+      void processAttachmentFiles(files);
       return;
     }
 
@@ -1708,7 +1792,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       ta.focus();
       ta.setSelectionRange(start + markdown.length, start + markdown.length);
     });
-  }, [compact, processImageFiles, updateAtQuery]);
+  }, [compact, processAttachmentFiles, updateAtQuery]);
 
   useEffect(() => {
     if (slashQuery === null) {
@@ -1873,12 +1957,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       {!compact && <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
         multiple
         style={{ display: "none" }}
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);
-          processImageFiles(files);
+          void processAttachmentFiles(files);
           e.target.value = "";
         }}
       />}
@@ -2546,8 +2629,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             </div>
           ) : (
             <button
-              onClick={handleSend}
-              disabled={!value.trim() && !attachedImages.length}
+              onClick={handleSpeechAwareSend}
+              disabled={attachmentUploadCount > 0 || speechStatus === "transcribing" || (speechStatus === "idle" && !value.trim() && !attachedImages.length)}
               style={{
                 display: "none",
                 flexShrink: 0,
@@ -2613,6 +2696,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         {speechError && (
           <div role="alert" className="text-xs px-2 py-1" style={{ color: "#ef4444", marginTop: 2 }}>
             {speechError}
+          </div>
+        )}
+        {attachmentError && (
+          <div role="alert" className="text-xs px-2 py-1" style={{ color: "#ef4444", marginTop: 2 }}>
+            {attachmentError}
           </div>
         )}
 
@@ -2689,32 +2777,37 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             <button
               className="chat-composer-attachment"
               onClick={() => fileInputRef.current?.click()}
-              disabled={speechStatus !== "idle"}
-             title={t("chat.attachImage")}
+              disabled={speechStatus !== "idle" || attachmentUploadCount > 0}
+              title={attachmentUploadCount > 0 ? t("chat.attachmentUploading") : t("chat.attachFiles")}
+              aria-label={attachmentUploadCount > 0 ? t("chat.attachmentUploading") : t("chat.attachFiles")}
               style={{
                 flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
                 width: 32, height: 32, padding: 0,
                 background: "none", border: "none",
                 borderRadius: 9,
-                color: attachedImages.length ? "var(--accent)" : "var(--text-muted)",
+                color: attachedImages.length || attachmentUploadCount > 0 ? "var(--accent)" : "var(--text-muted)",
                 cursor: "pointer",
                 opacity: 1,
                 transition: "background 0.12s, color 0.12s",
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.background = "var(--bg-hover)";
-                e.currentTarget.style.color = attachedImages.length ? "var(--accent)" : "var(--text)";
+                e.currentTarget.style.color = attachedImages.length || attachmentUploadCount > 0 ? "var(--accent)" : "var(--text)";
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background = "none";
-                e.currentTarget.style.color = attachedImages.length ? "var(--accent)" : "var(--text-muted)";
+                e.currentTarget.style.color = attachedImages.length || attachmentUploadCount > 0 ? "var(--accent)" : "var(--text-muted)";
               }}
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                <circle cx="8.5" cy="8.5" r="1.5" />
-                <polyline points="21 15 16 10 5 21" />
-              </svg>
+              {attachmentUploadCount > 0 ? (
+                <svg className="chat-composer-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                  <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                </svg>
+              ) : (
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                </svg>
+              )}
             </button>
             {/* Model selector - visible always, disabled while the session or switch is busy */}
             {(modelOptions.length > 0 || model || modelError) && onModelChange && (
@@ -3192,8 +3285,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 type="button"
                 className={compact ? undefined : "chat-composer-send"}
                 style={compact ? { padding: "7px 14px", background: "var(--accent)", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" } : undefined}
-                onClick={handleSend}
-                disabled={(!value.trim() && !attachedImages.length) || speechStatus !== "idle"}
+                onClick={handleSpeechAwareSend}
+                disabled={attachmentUploadCount > 0 || speechStatus === "transcribing" || (speechStatus === "idle" && !value.trim() && !attachedImages.length)}
                 title={t("chat.send")}
                 aria-label={t("chat.send")}
               >
