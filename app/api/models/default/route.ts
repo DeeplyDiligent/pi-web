@@ -1,6 +1,6 @@
 import { stat } from "fs/promises";
 import { resolve } from "path";
-import { createAgentSessionServices, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { createModelSelectionServices } from "@/lib/model-runtime";
 import {
   isThinkingLevel,
   projectSettingsPath,
@@ -11,7 +11,6 @@ import {
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
 import { resolveVisibleModels } from "@/lib/model-scope";
 import { invalidateModelsCache } from "@/lib/models-cache";
-import { projectTrustReloadOptions } from "@/lib/project-trust";
 
 export const dynamic = "force-dynamic";
 
@@ -72,13 +71,7 @@ export async function PUT(req: Request) {
   }
 
   try {
-    const agentDir = getAgentDir();
-    const trustReloadOptions = projectTrustReloadOptions(cwd, agentDir);
-    const services = await createAgentSessionServices({
-      cwd,
-      agentDir,
-      ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),
-    });
+    const services = await createModelSelectionServices(cwd);
     const { settingsManager } = services;
 
     const shadowed = shadowingProjectKeys(settingsManager, edit);

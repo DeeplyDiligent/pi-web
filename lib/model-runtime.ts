@@ -3,17 +3,33 @@ import {
   getAgentDir,
   type ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
+import { projectTrustReloadOptions } from "./project-trust";
+import { syncCopilotModels } from "./copilot-discovery";
 
 /**
- * ModelRuntime that also includes providers registered by extensions (an
- * extension that calls `registerProvider` / `createProvider` during resource
- * loading). A bare `ModelRuntime.create()` only knows built-in providers plus
- * models.json, so extension-registered providers were invisible to the
- * provider-listing and auth routes.
- *
- * The agent dir acts as cwd so project-local extensions stay out; global
- * package extensions always load. Not cached: these routes need fresh
- * credentials for auth status and login/logout to be truthful.
+ * The picker, enabled-model catalog and default validation must use the same
+ * project-aware inventory, including directly discovered Copilot models.
+ * This deliberately does not apply enabledModels: only the picker/default
+ * validator scopes the inventory; the catalog needs disabled rows too.
+ */
+export async function createModelSelectionServices(cwd: string, { forceCopilot = false } = {}) {
+  const agentDir = getAgentDir();
+  const trustReloadOptions = projectTrustReloadOptions(cwd, agentDir);
+  const services = await createAgentSessionServices({
+    cwd,
+    agentDir,
+    ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),
+  });
+  const copilotCatalog = await syncCopilotModels(services.modelRuntime, {
+    force: forceCopilot,
+    background: !forceCopilot,
+  });
+  return { ...services, copilotCatalog };
+}
+
+/**
+ * Global extension providers for auth routes. The agent dir acts as cwd so
+ * project-local extensions stay out. Fresh credentials, no direct discovery.
  */
 export async function createModelRuntimeWithExtensions(): Promise<ModelRuntime> {
   const agentDir = getAgentDir();

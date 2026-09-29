@@ -1,6 +1,6 @@
 import { stat } from "fs/promises";
 import { resolve } from "path";
-import { getAgentDir, SettingsManager, type ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type SettingsManager, type ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import {
   clearEnabledModels,
@@ -22,7 +22,7 @@ import {
   type EnabledModelsView,
 } from "@/lib/enabled-models-runtime";
 import type { EnabledModelsInput } from "@/lib/enabled-models";
-import { createModelRuntimeWithExtensions } from "@/lib/model-runtime";
+import { createModelSelectionServices } from "@/lib/model-runtime";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
 import { invalidateModelsCache } from "@/lib/models-cache";
 
@@ -37,12 +37,14 @@ interface RequestContext {
 }
 
 async function loadContext(cwd: string): Promise<RequestContext> {
-  const modelRuntime = await createModelRuntimeWithExtensions();
+  const { modelRuntime, settingsManager } = await createModelSelectionServices(cwd);
   const agentDir = getAgentDir();
   return {
     modelRuntime,
+    // Authentication/provider availability only, never enabledModels scoping:
+    // disabled models must remain in the catalog so they can be enabled again.
     models: await modelRuntime.getAvailable(),
-    settingsManager: SettingsManager.create(cwd, agentDir),
+    settingsManager,
     paths: { cwd, agentDir },
   };
 }
