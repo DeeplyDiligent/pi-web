@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Publishing must never overlap or be cancelled halfway through.
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+      - run: npm ci
+      - name: Allocate or resume a patch version
+        id: version
+        run: node scripts/automated-release.mjs plan >> "$GITHUB_OUTPUT"
+      - name: Prepare versioned release commit
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          REUSE: ${{ steps.version.outputs.reuse }}
+        run: |
+          if [ "$REUSE" = true ]; then
+            git checkout --detach "v$VERSION"
+          else
+            npm version "$VERSION" --no-git-tag-version --ignore-scripts
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add package.json package-lock.json
+            git commit -m "chore(release): v$VERSION" -m "Pi-Web-Source: $GITHUB_SHA"
+          fi
+          test "$(node -p "require('./package.json').version")" = "$VERSION"
+      - name: Build and pack
+        id: pack
+        run: |
+          npm run build
+          npm pack --json > "$RUNNER_TEMP/pack.json"
+          node -e 'const fs=require("node:fs"); const [p]=JSON.parse(fs.readFileSync(process.argv[1], "utf8")); fs.appendFileSync(process.env.GITHUB_OUTPUT, `file=${p.filename}\n`)' "$RUNNER_TEMP/pack.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-package-${{ steps.version.outputs.version }}-${{ github.run_attempt }}
+          path: ${{ steps.pack.outputs.file }}
+          retention-days: 30
+          if-no-files-found: error
+      - name: Reserve release tag for safe retries
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          REUSE: ${{ steps.version.outputs.reuse }}
+        run: |
+          if [ "$REUSE" != true ]; then
+            git tag -a "v$VERSION" -m "v$VERSION"
+            git push origin "refs/tags/v$VERSION"
+          fi
+      - name: Publish GitHub Release as Latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PACKAGE_FILE: ${{ steps.pack.outputs.file }}
+        run: |
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            gh release upload "v$VERSION" "$PACKAGE_FILE" --clobber
+            gh release edit "v$VERSION" --draft=false --latest
+          else
+            gh release create "v$VERSION" "$PACKAGE_FILE" --verify-tag \
+              --title "v$VERSION" --generate-notes --latest
+          fi
+          echo "Published v$VERSION to GitHub Releases (Latest)." >> "$GITHUB_STEP_SUMMARY"

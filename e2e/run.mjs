@@ -221,6 +221,9 @@ try {
   browser = await chromium.launch();
   for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
     context = await browser.newContext({ viewport, locale: "en-US" });
+    // This scenario tests lazy loading by opening initially collapsed thinking.
+    // Do not depend on the fork's expanded default or a user's preferences.
+    await context.addInitScript(() => localStorage.setItem("pi-thinking-expanded", "false"));
     await context.tracing.start({ screenshots: true, snapshots: true });
     page = await context.newPage();
     page.setDefaultTimeout(30_000);

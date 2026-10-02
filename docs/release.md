@@ -1,177 +1,54 @@
-# Release Checklist
+# GitHub Releases
 
-This repo publishes two artifacts for each release:
+## Automatic CD on `main`
 
-- npm package: `@agegr/pi-web`
-- GitHub Release: `agegr/pi-web`
+`.github/workflows/release.yml` runs on pushes to `main`. It:
 
-Use this checklist from a clean `main` checkout.
+1. Calls the reusable CI workflow: lint, TypeScript, unit tests, and production-mode E2E tests must all pass.
+2. Allocates the next **patch** version above the highest stable version in `package.json` or the repository's `v*` tags. Prereleases are excluded. For example, `0.9.3` becomes `0.9.4`.
+3. Updates `package.json` and `package-lock.json` in a release-only commit and builds the app on the GitHub runner.
+4. Runs `npm pack` to produce an installable `.tgz` and retains it as an Actions artifact for 30 days.
+5. Pushes an annotated `v<version>` tag pointing to that release commit.
+6. Creates a **GitHub Release**, attaches the packaged app, generates commit-based release notes, and explicitly marks it **Latest**.
 
-## 1. Preflight
+**Nothing is published to npm.** `npm ci`, `npm version`, and `npm pack` are only used to install dependencies, update local package metadata, and create the archive. Version allocation never queries the npm registry. No `NPM_TOKEN` or npm publishing account is needed.
 
-```bash
-git status --short --branch
-git log --oneline --decorate -5
-gh auth status
-npm whoami
-node -e "const p=require('./package.json'); console.log(p.version)"
-```
+The version bump is persisted in the tagged release commit, **not pushed back to `main`**. This avoids bot-triggered release loops, conflicts with simultaneous pushes, and branch-protection bypasses. The source SHA is recorded in a `Pi-Web-Source` commit trailer. Future releases use repository tags as version history even though `main` keeps its source version.
 
-Expected:
+Publishing runs are serialized and never cancelled in progress. GitHub concurrency keeps at most one pending run, so rapid pushes may be coalesced into the newest pending source revision. Pull requests only run CI and never publish. Builds happen on disposable GitHub runners; this workflow does not build in or restart the local Pi Web installation.
 
-- `git status` is clean, or only contains changes you intentionally plan to release.
-- GitHub is authenticated as an account that can push and create releases.
-- npm is authenticated as an account that can publish `@agegr/pi-web`.
+## One-time setup
 
-## 2. Publish to npm
+- Enable GitHub Actions in this repository.
+- Allow the release workflow's automatic `GITHUB_TOKEN` to write repository contents (the workflow requests `contents: write`). Repository/org policies and tag rules must permit the Actions bot to create `v*` tags and releases.
 
-```bash
-npm run release
-```
+No personal access token, npm secret, or permission to write to `main` is required. Package scope ownership does not affect creating or downloading the GitHub release archive.
 
-The release script runs:
+## Retries and partial failures
 
-```bash
-npm version patch --no-git-tag-version && npm run build && npm publish --access public
-```
+Use **Re-run failed jobs** on the original Release workflow run.
 
-Notes:
+- Before the tag is reserved, a retry may allocate a fresh version if another release has advanced the history.
+- Once the tag exists, a retry finds the exact source trailer and reuses that version and release commit.
+- If the GitHub Release already exists, the workflow replaces its archive attachment and explicitly marks the release Latest.
+- A retry refuses to move Latest backwards if a newer stable release tag exists.
+- Tags reserved before a failed release upload are intentionally retained so retries cannot accidentally allocate another version. Do not delete or repoint a published release tag.
 
-- This bumps `package.json` and `package-lock.json`.
-- It intentionally runs a production build. Do not run `next build` during normal development; release work is the exception.
-- If `npm view @agegr/pi-web version` briefly shows the previous version, check the exact version instead:
+Tag creation and release publication are separate operations. If release publication fails after tag creation, retry the failed publish job to finish it. A retry rebuilds the archive, so its build bytes may differ while its version and source remain the same.
 
-```bash
-npm view @agegr/pi-web@<version> version --registry https://registry.npmjs.org/
-npm view @agegr/pi-web versions --json --registry https://registry.npmjs.org/
-```
+## Verification and installation
 
-## 3. Commit the Version Bump
-
-Replace `<version>` with the new package version, for example `0.7.5`.
+Replace `<version>` and `<owner/repo>` with the actual release values:
 
 ```bash
-git diff -- package.json package-lock.json
-git add package.json package-lock.json
-git commit -m "Release v<version>"
+gh release view v<version> --repo <owner/repo>
+gh api repos/<owner/repo>/releases/latest --jq .tag_name
+gh release download v<version> --repo <owner/repo> --pattern '*.tgz'
+npx --yes --package=https://github.com/<owner/repo>/releases/download/v<version>/agegr-pi-web-<version>.tgz pi-web-server
 ```
 
-## 4. Tag and Push
+Requires Node.js 22.19.0 or newer. `pi-web-server` is the portable launcher: it starts the app at `http://127.0.0.1:30141` without requiring Cloudflare Tunnel. The existing `pi-web` command keeps this installation's Windows-specific tunnel behavior. You can pass `--port <port>` to `pi-web-server` to change the port.
 
-```bash
-git tag -a v<version> -m "v<version>"
-git push origin main --tags
-```
+The release version and GitHub Latest should agree. The `.tgz` contains the compiled app and package metadata, not bundled dependencies; installing it still resolves dependencies from npm. Inspect the Actions run's CI jobs and uploaded package artifact if publication did not complete.
 
-Confirm the tag does not already exist before creating it when unsure:
-
-```bash
-git ls-remote --tags origin v<version>
-gh release view v<version> --repo agegr/pi-web
-```
-
-## 5. Generate Release Notes from Commits
-
-Use the previous release tag as the base.
-
-```bash
-git log --oneline --decorate v<previous>..v<version>
-git log --format='%h%x09%s%n%b' v<previous>..v<version>
-git diff --stat v<previous>..v<version>
-```
-
-Write the release notes from those commits, not from memory. Include both Chinese and English sections. Keep commit hashes next to each item when useful.
-
-Suggested structure:
-
-```markdown
-## 中文
-
-基于 `v<previous>..v<version>` 的提交整理。
-
-### 新增
-
-- ...
-
-### 修复
-
-- ...
-
-### 改进
-
-- ...
-
-### 内部调整
-
-- 发布 npm 包 `@agegr/pi-web@<version>`。
-
-## English
-
-Prepared from commits in `v<previous>..v<version>`.
-
-### Added
-
-- ...
-
-### Fixed
-
-- ...
-
-### Improved
-
-- ...
-
-### Internal
-
-- Published npm package `@agegr/pi-web@<version>`.
-```
-
-## 6. Create or Update the GitHub Release
-
-Create a new release:
-
-```bash
-gh release create v<version> \
-  --repo agegr/pi-web \
-  --verify-tag \
-  --title "v<version>" \
-  --notes-file release-notes.md
-```
-
-If the release already exists and only the notes need updating:
-
-```bash
-gh release edit v<version> \
-  --repo agegr/pi-web \
-  --notes-file release-notes.md
-```
-
-You can avoid a temporary file by passing notes through stdin:
-
-```bash
-gh release edit v<version> --repo agegr/pi-web --notes-file - <<'EOF'
-## 中文
-
-...
-
-## English
-
-...
-EOF
-```
-
-## 7. Final Verification
-
-```bash
-gh release view v<version> --repo agegr/pi-web
-npm view @agegr/pi-web@<version> version --registry https://registry.npmjs.org/
-git status --short --branch
-git log --oneline --decorate -3
-```
-
-Expected:
-
-- GitHub Release exists and is not a draft unless intentionally published as one.
-- npm exact version resolves.
-- `main` is aligned with `origin/main`.
-- `HEAD` points at the release commit and `v<version>` tag.
+The pre-existing `npm run release` helper is an unrelated manual npm-publishing command; do not use it for this GitHub-only pipeline. Any manual production build must use a separate private checkout/release directory, never the active development checkout.
