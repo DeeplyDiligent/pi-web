@@ -223,7 +223,14 @@ try {
     context = await browser.newContext({ viewport, locale: "en-US" });
     // This scenario tests lazy loading by opening initially collapsed thinking.
     // Do not depend on the fork's expanded default or a user's preferences.
-    await context.addInitScript(() => localStorage.setItem("pi-thinking-expanded", "false"));
+    await context.addInitScript((origin) => {
+      if (window === window.top && location.origin === origin) {
+        localStorage.setItem("pi-thinking-expanded", "false");
+      }
+    }, base);
+    // Foundry speech requires local hardware/models that hosted CI does not have.
+    // This suite exercises chat/history, not speech transcription.
+    await context.route("**/api/speech/warm", (route) => route.fulfill({ status: 204 }));
     await context.tracing.start({ screenshots: true, snapshots: true });
     page = await context.newPage();
     page.setDefaultTimeout(30_000);
