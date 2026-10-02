@@ -5,7 +5,7 @@ import type { Processor } from "unified";
 import type {} from "remark-parse";
 import type {} from "micromark-extension-math";
 
-/** Tight single-dollar delimiters avoid pairing unrelated currency amounts.
+/** Reject currency/prose pairs without excluding symbolic or padded math.
  * Double dollars (including display math) retain remark-math's normal behavior.
  * Reject at tokenization time so Markdown emphasis inside currency prose is
  * parsed normally rather than trying to repair an already-rendered math node.
@@ -27,13 +27,14 @@ export function remarkCurrencySafeMath(this: Processor): void {
           if (!raw.startsWith("$$")) {
             const content = raw.slice(1, -1);
             const closesBeforeAmount = code !== null && code >= 48 && code <= 57;
-            const looseDelimiter = /^\s|\s$/.test(content);
+            const startsWithAmount = /^\s*[-+]?(?:\d|\.\d)/.test(content);
+            const mismatchedPadding = /^\s/.test(content) !== /\s$/.test(content);
             // "$7.50m plan ... **$x$**" must not swallow the prose before x.
             // Numeric equations and explicit LaTeX commands remain supported.
-            const numericProse = /^[-+]?\d/.test(content)
+            const numericProse = /^\s*[-+]?\d/.test(content)
               && (/\s[A-Za-z]{2,}\s+[A-Za-z]{2,}\b/.test(content) || /\*\*|__/.test(content))
               && !/\\[A-Za-z]+/.test(content);
-            if (closesBeforeAmount || looseDelimiter || numericProse) return nok(code);
+            if (startsWithAmount && (closesBeforeAmount || mismatchedPadding || numericProse)) return nok(code);
           }
         }
         return ok(code);

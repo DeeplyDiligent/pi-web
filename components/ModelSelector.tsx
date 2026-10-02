@@ -319,6 +319,9 @@ export function ModelSelector({
                   onChange={(event) => setFilter(event.target.value)}
                   placeholder={t("chat.filterModels")}
                   aria-label={t("chat.filterModels")}
+                  // On phones, focusing the filter opens the on-screen keyboard,
+                  // which shrinks the viewport and pushes the list off-screen
+                  // before the user has decided to filter. Tap to filter instead.
                   autoFocus={!isMobile}
                   autoComplete="off"
                   spellCheck={false}

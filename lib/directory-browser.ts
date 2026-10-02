@@ -64,16 +64,14 @@ export class InvalidDirectoryNameError extends Error {
   }
 }
 
+export function isValidDirectoryName(name: string): boolean {
+  return Boolean(name) && name !== "." && name !== ".." && !/[\\/\u0000-\u001f]/.test(name);
+}
+
 /** Create one direct child of an existing directory and return its canonical path. */
 export async function createChildDirectory(parentDirectory: string, name: string): Promise<string> {
   const folderName = name.trim();
-  if (
-    !folderName
-    || folderName === "."
-    || folderName === ".."
-    || /[\\/]/.test(folderName)
-    || /[\u0000-\u001f]/.test(folderName)
-  ) {
+  if (!isValidDirectoryName(folderName)) {
     throw new InvalidDirectoryNameError();
   }
 
@@ -87,6 +85,8 @@ export async function createChildDirectory(parentDirectory: string, name: string
   await mkdir(createdPath);
   return realpath(createdPath);
 }
+
+export const createDirectory = createChildDirectory;
 
 export async function listDirectories(directory: string): Promise<BrowsableDirectory[]> {
   const entries = await readdir(directory, { withFileTypes: true });

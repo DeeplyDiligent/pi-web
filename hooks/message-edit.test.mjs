@@ -7,7 +7,7 @@ import vm from "node:vm";
 const source = await readFile(new URL("./useAgentSession.ts", import.meta.url), "utf8");
 const chat = await readFile(new URL("../components/ChatWindow.tsx", import.meta.url), "utf8");
 const start = source.indexOf("  const handleEdit = useCallback");
-const end = source.indexOf("  const handleLeafChange", start);
+const end = source.indexOf("  const handleNavigate", start);
 assert.ok(start > 0 && end > start);
 
 function fixture(sendAgentCommand, loadSession = async () => {}) {
@@ -65,7 +65,7 @@ test("failed/cancelled edits and navigation away never overwrite another compose
 });
 
 test("chat applies editor content only after successful edit and offers actions during a run", () => {
-  assert.match(chat, /const editable = await handleEdit\(entryId, message\);\s*if \(editable\) handleEditContent\(editable\)/);
+  assert.match(chat, /const editable = await handleEdit\(entryId, message\);\s*if \(editable\) restoreEditedContent\(editable\)/);
   assert.match(chat, /onEdit=\{msg\.role === "user" && \(entryIds\[idx\] \|\| idx === lastUserIdx\)/);
   assert.doesNotMatch(chat, /onFork=\{sessionBusy|onNavigate=\{sessionBusy/);
   assert.match(chat, /showTimestamp && keyPrefix !== "process"/);

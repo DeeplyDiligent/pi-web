@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { type CSSProperties, type FormEvent, useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "@/hooks/useI18n";
 
@@ -18,9 +18,21 @@ interface BrowseResponse {
 }
 
 interface CreateDirectoryResponse {
+  success?: boolean;
   path?: string;
   error?: string;
 }
+
+
+const panelSurfaceStyle: CSSProperties = {
+  overflow: "hidden", background: "var(--bg)", border: "1px solid var(--border)",
+  borderRadius: 10, boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+};
+const textInputStyle: CSSProperties = {
+  height: 36, padding: "0 10px", border: "1px solid var(--border)", borderRadius: 6,
+  outline: "none", background: "var(--bg-panel)", color: "var(--text)",
+  fontFamily: "var(--font-mono)", fontSize: 12,
+};
 
 async function loadDirectories(directory?: string): Promise<BrowseResponse> {
   const query = directory ? `?path=${encodeURIComponent(directory)}` : "";
@@ -167,7 +179,7 @@ export function DirectoryPicker({ onCancel, onSelect, initialPath, busy = false,
       }}
       style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.35)" }}
     >
-      <div className="directory-picker-panel" style={{ width: 520, maxWidth: "calc(100vw - 16px)", height: "min(620px, calc(100dvh - 16px))", maxHeight: "calc(100dvh - 16px)", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
+      <div className="directory-picker-panel" style={{ ...panelSurfaceStyle, position: "relative", width: 520, maxWidth: "calc(100vw - 16px)", height: "min(620px, calc(100dvh - 16px))", maxHeight: "calc(100dvh - 16px)", display: "flex", flexDirection: "column" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0, padding: "12px 18px", borderBottom: "1px solid var(--border)" }}>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ color: "var(--text)", fontWeight: 700, fontSize: 15 }}>{t("directoryPicker.selectDirectory")}</div>
@@ -207,7 +219,7 @@ export function DirectoryPicker({ onCancel, onSelect, initialPath, busy = false,
               setPathInput(event.target.value);
               setLoadError(null);
             }}
-            style={{ minWidth: 0, flex: 1, height: 36, padding: "0 10px", border: "1px solid var(--border)", borderRadius: 6, outline: "none", background: "var(--bg-panel)", color: "var(--text)", fontFamily: "var(--font-mono)", fontSize: 12 }}
+            style={{ ...textInputStyle, minWidth: 0, flex: 1 }}
           />
           <button
             className="directory-picker-action"
@@ -354,6 +366,8 @@ export function DirectoryPicker({ onCancel, onSelect, initialPath, busy = false,
             </button>
           </div>
         </div>
+
+
       </div>
     </div>,
     portalTarget,

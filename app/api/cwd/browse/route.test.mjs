@@ -15,7 +15,7 @@ const { POST } = await jiti.import("./route.ts");
 function createRequest(body) {
   return new Request("http://localhost/api/cwd/browse", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Host: "localhost" },
     body: JSON.stringify(body),
   });
 }
@@ -27,7 +27,7 @@ test("creates a direct child folder and returns its canonical path", async (t) =
   const response = await POST(createRequest({ parentPath, name: "  new-project  " }));
 
   assert.equal(response.status, 201);
-  assert.deepEqual(await response.json(), { path: path.join(parentPath, "new-project") });
+  assert.deepEqual(await response.json(), { success: true, path: path.join(parentPath, "new-project") });
   await access(path.join(parentPath, "new-project"));
 });
 
@@ -49,5 +49,5 @@ test("does not overwrite an existing folder", async (t) => {
   const response = await POST(createRequest({ parentPath, name: "existing" }));
 
   assert.equal(response.status, 409);
-  assert.deepEqual(await response.json(), { error: "A folder with that name already exists" });
+  assert.deepEqual(await response.json(), { error: "A file or directory with this name already exists" });
 });
