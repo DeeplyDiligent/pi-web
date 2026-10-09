@@ -6,6 +6,9 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
 import { remarkCurrencySafeMath } from "./remark-currency-safe-math";
+import remarkCjkFriendly from "remark-cjk-friendly/parseOnly";
+import type { Plugin } from "unified";
+import type { Extension } from "micromark-util-types";
 
 const markdownSanitizeSchema = {
   ...defaultSchema,
@@ -475,6 +478,7 @@ function remarkSplitAutolinkLiterals() {
 export const markdownRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [
   [remarkFrontmatter, ["yaml"]],
   [remarkGfm, remarkGfmOptions],
+  remarkCjkFriendly,
   remarkSplitAutolinkLiterals,
   remarkCurrencySafeMath,
 ];
@@ -540,6 +544,7 @@ export const markdownUserRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = 
 export const markdownPreviewRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [
   [remarkFrontmatter, ["yaml"]],
   [remarkGfm, remarkGfmOptions],
+  remarkCjkFriendly,
   remarkSplitAutolinkLiterals,
   remarkCurrencySafeMath,
 ];

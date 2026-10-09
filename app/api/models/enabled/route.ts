@@ -23,6 +23,7 @@ import {
 } from "@/lib/enabled-models-runtime";
 import type { EnabledModelsInput } from "@/lib/enabled-models";
 import { createModelSelectionServices } from "@/lib/model-runtime";
+import { withDeferredProviderModels } from "@/lib/deferred-provider-models";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
 import { invalidateModelsCache } from "@/lib/models-cache";
 
@@ -37,7 +38,8 @@ interface RequestContext {
 }
 
 async function loadContext(cwd: string): Promise<RequestContext> {
-  const { modelRuntime, settingsManager } = await createModelSelectionServices(cwd);
+  const { modelRuntime: runtime, settingsManager } = await createModelSelectionServices(cwd);
+  const modelRuntime = withDeferredProviderModels(runtime);
   const agentDir = getAgentDir();
   return {
     modelRuntime,

@@ -26,13 +26,13 @@ function setup(fetch) {
   return { context, selections };
 }
 
-test("both New entry points open one chooser and share the sidebar's searchable list", () => {
-  assert.match(shell, /onNewSession=\{requestNewSession\}/);
+test("the shell keeps its workspace chooser alongside the sidebar's direct New action", () => {
+  assert.match(shell, /onNewSession=\{handleNewSession\}/);
   assert.match(shell, /onClick=\{requestNewSession\}/);
   assert.match(shell, /setNewThreadDialogOpen\(true\)/);
   assert.match(shell, /<NewThreadDialog[\s\S]*?onCancel=\{\(\) => setNewThreadDialogOpen\(false\)\}/);
-  assert.match(sidebar, /onClick=\{onNewSession\}/);
-  assert.match(sidebar, /<ProjectPicker/);
+  assert.match(sidebar, /onClick=\{handleNewSession\}/);
+  assert.match(sidebar, /<ProjectWorktreePicker/);
   assert.match(source, /<ProjectPicker/);
   assert.match(picker, /filterProjects\(projects, query\)/);
   assert.match(picker, /event\.key === "Enter" && visibleProjects\.length === 1 && !disabled/);

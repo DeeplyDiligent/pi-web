@@ -5,6 +5,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { projectTrustReloadOptions } from "./project-trust";
 import { syncCopilotModels } from "./copilot-discovery";
+import { rememberProviderModels } from "./deferred-provider-models";
 
 /**
  * The picker, enabled-model catalog and default validation must use the same
@@ -24,6 +25,7 @@ export async function createModelSelectionServices(cwd: string, { forceCopilot =
     force: forceCopilot,
     background: !forceCopilot,
   });
+  await rememberProviderModels(services.modelRuntime);
   return { ...services, copilotCatalog };
 }
 
@@ -34,5 +36,6 @@ export async function createModelSelectionServices(cwd: string, { forceCopilot =
 export async function createModelRuntimeWithExtensions(): Promise<ModelRuntime> {
   const agentDir = getAgentDir();
   const services = await createAgentSessionServices({ cwd: agentDir, agentDir });
+  await rememberProviderModels(services.modelRuntime);
   return services.modelRuntime;
 }

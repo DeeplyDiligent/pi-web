@@ -12,6 +12,6 @@ test("new-chat branding uses the runtime blue/work icon without optimizer cachin
 
 test("new-chat branding aligns with the fork's mobile and desktop composer gutters", () => {
   assert.match(branding, /paddingLeft: isMobile \? 8 : 16, paddingRight: isMobile \? 8 : 52/);
-  assert.match(branding, /maxWidth: "var\(--chat-content-max-width, 820px\)", margin: "0 auto"/);
-  assert.match(branding, /alignItems: "center", gap: isMobile \? 7 : 10/);
+  assert.match(branding, /className="new-session-hero-row" style=\{\{ maxWidth: "var\(--chat-content-max-width, 820px\)"/);
+  assert.match(branding, /className="new-session-brand" style=\{\{ gap: isMobile \? 7 : 10/);
 });
