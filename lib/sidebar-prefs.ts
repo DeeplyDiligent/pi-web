@@ -17,6 +17,8 @@ const RETIRED_STORAGE_KEYS = ["pi-web:file-explorer:open", "pi-web:sidebar-sessi
 const MAX_GROUP_EXPANSION_ENTRIES = 300;
 
 export type SidebarTab = "sessions" | "files";
+export type SessionListView = "projects" | "chronological";
+export const SESSION_LIST_VIEW_STORAGE_KEY = "pi-web:session-list-view";
 
 interface StorageLike {
   getItem(key: string): string | null;
@@ -30,6 +32,22 @@ function getBrowserStorage(): StorageLike | null {
     return window.localStorage;
   } catch {
     return null;
+  }
+}
+
+export function loadSessionListView(storage: StorageLike | null = getBrowserStorage()): SessionListView {
+  try {
+    return storage?.getItem(SESSION_LIST_VIEW_STORAGE_KEY) === "chronological" ? "chronological" : "projects";
+  } catch {
+    return "projects";
+  }
+}
+
+export function saveSessionListView(view: SessionListView, storage: StorageLike | null = getBrowserStorage()): void {
+  try {
+    storage?.setItem(SESSION_LIST_VIEW_STORAGE_KEY, view);
+  } catch {
+    // Persistence is best-effort.
   }
 }
 

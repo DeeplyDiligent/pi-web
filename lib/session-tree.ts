@@ -20,6 +20,7 @@
 import { listSessionFamilies, type SessionFamily } from "./session-family";
 import type { ProjectMovePosition, SessionUiFamilyState, SessionUiState } from "./session-ui-state-shared";
 import type { SessionInfo } from "./types";
+import type { SessionListView } from "./sidebar-prefs";
 import { workspaceKeyOf } from "./workspace-memory";
 
 export type SidebarLayout = "desktop" | "mobile";
@@ -43,7 +44,7 @@ export interface SidebarFamilyStatus { running: boolean; unread: boolean; select
 
 export type SidebarRow =
   | { kind: "pinned-header"; key: "pinned-header"; count: number; collapsed: boolean; running: number; unread: number }
-  | { kind: "session"; key: string; family: SessionFamily; context: "pinned" | "group" | "archive"; project: SidebarProject; status: SidebarFamilyStatus; archivedAt: number | null }
+  | { kind: "session"; key: string; family: SessionFamily; context: "pinned" | "group" | "archive"; project: SidebarProject; status: SidebarFamilyStatus; archivedAt: number | null; showProject?: boolean }
   | { kind: "pinned-more"; key: "pinned-more"; hidden: number; canShowLess: boolean }
   | { kind: "group"; key: string; project: SidebarProject; expanded: boolean; running: number; unread: number }
   | { kind: "group-more"; key: string; projectKey: string; hidden: number; canShowLess: boolean }
@@ -67,6 +68,7 @@ export interface SessionTreeInput {
   /** Families revealed beyond the base limit by "show more", per projectKey or PINNED_MORE_KEY. */
   moreShown: Readonly<Record<string, number>>;
   pinnedCollapsed: boolean;
+  listView?: SessionListView;
 }
 
 export interface SessionTreeModel {
@@ -449,7 +451,47 @@ export function buildSessionTree(input: SessionTreeInput): SessionTreeModel {
   rows.push({ kind: "footer-open", key: "footer-open" });
   if (archivedCount > 0) rows.push({ kind: "footer-archived", key: "footer-archived", count: archivedCount });
 
+  if (input.listView === "chronological") {
+    // No project limits or pin section: every live chat shares one activity order.
+    // Keep group row keys so fork reveal and focus return work in either view.
+    rows.length = 0;
+    for (const family of families) {
+      if (isFamilyArchived(family, uiState, runningIds)) continue;
+      const row = sessionRow(family, "group", resolver.get(familyProjectKey(family)), input, null);
+      if (row.kind === "session") row.showProject = true;
+      rows.push(row);
+    }
+    rows.push({ kind: "footer-open", key: "footer-open" });
+    if (archivedCount > 0) rows.push({ kind: "footer-archived", key: "footer-archived", count: archivedCount });
+  }
+
   return { rows, projects: orderedProjects, archivedCount, unorderedKeysByBand, projectKeysToRecord };
+}
+
+/** Header New follows the filter, keeping the current worktree only within that project. */
+export function newSessionTargetForProject(project: SidebarProject | null, currentCwd: string | null):
+  { cwd: string; projectKey?: string; projectRoot?: string } | null {
+  if (project) return {
+    cwd: project.current && currentCwd ? currentCwd : project.root,
+    projectKey: project.key,
+    projectRoot: project.root,
+  };
+  return currentCwd ? { cwd: currentCwd } : null;
+}
+
+/** Every project with a visible chat, including projects whose chats are all pinned. */
+export function sessionRowProjects(rows: readonly SidebarRow[]): SidebarProject[] {
+  const projects = new Map<string, SidebarProject>();
+  for (const row of rows) {
+    if (row.kind === "session") projects.set(row.project.key, row.project);
+  }
+  return [...projects.values()].sort((a, b) => a.name.localeCompare(b.name) || a.root.localeCompare(b.root));
+}
+
+/** Filter only chats; keep navigation footers and activity order unchanged. Null means All. */
+export function filterSessionRows(rows: SidebarRow[], projectKey: string | null): SidebarRow[] {
+  if (projectKey === null) return rows;
+  return rows.filter((row) => row.kind !== "session" || row.project.key === projectKey);
 }
 
 /**
@@ -541,7 +583,11 @@ export function getRowOffsets(rows: readonly SidebarRow[], layout: SidebarLayout
   const offsets = new Array<number>(rows.length + 1);
   offsets[0] = 0;
   for (let index = 0; index < rows.length; index++) {
-    offsets[index + 1] = offsets[index] + heights[rows[index].kind];
+    const row = rows[index];
+    const height = row.kind === "session" && row.showProject
+      ? (layout === "desktop" ? 48 : 56)
+      : heights[row.kind];
+    offsets[index + 1] = offsets[index] + height;
   }
   return offsets;
 }

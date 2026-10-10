@@ -496,6 +496,7 @@ const SessionRowView = memo(function SessionRowView({
     status.selected ? "is-selected" : "",
     status.running ? "is-running" : "",
     context === "archive" ? "is-archived" : "",
+    row.showProject ? "has-project-label" : "",
     menuOpen ? "is-menu-open" : "",
     confirming ? "is-confirming" : "",
     renaming ? "is-renaming" : "",
@@ -550,7 +551,7 @@ const SessionRowView = memo(function SessionRowView({
   // the suffix that tells it from its source, never the suffix.
   const forkTitle = root.name && root.relation?.kind === "fork" ? splitForkSuffix(root.name) : null;
   const details = root.detailsPending ? "…" : t("sidebar.messagesCount", { count: root.messageCount });
-  const tooltip = `${title}\n${details} · ${formatRelativeTime(root.modified, locale, nowDate)}${branch ? ` · ⑂ ${branch}` : ""}`;
+  const tooltip = `${title}\n${row.project.root}\n${details} · ${formatRelativeTime(root.modified, locale, nowDate)}${branch ? ` · ⑂ ${branch}` : ""}`;
 
   // The right column says the one thing worth knowing: running, else unread,
   // else when (a pinned row names its project instead, an archived row says
@@ -595,6 +596,7 @@ const SessionRowView = memo(function SessionRowView({
         ) : (
           <span className="session-tree-title">{title}</span>
         )}
+        {row.showProject && <span className="session-tree-project-label" title={row.project.root}>{row.project.name}</span>}
         {branch && <span className="session-tree-branch">⑂ {branch}</span>}
         <span className={`session-tree-meta${metaState}`} title={metaTitle}>{meta}</span>
       </button>

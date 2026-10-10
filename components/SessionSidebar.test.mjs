@@ -483,8 +483,12 @@ test("a new session moves the cwd and hands the shell the target's project", () 
   const cwd = body.indexOf("setSelectedCwd(cwd);");
   const handOff = body.indexOf("onNewSession?.(createTempSessionId(), cwd, projectKey, carryComposer ? { carryComposer: true } : undefined);");
   assert.ok(identity >= 0 && identity < cwd && cwd < handOff, "identity, then cwd, then the new session");
-  // The header "+" keeps the sidebar's cwd and lets the shell keep its project.
-  assert.match(callbackBody("handleNewSession"), /if \(!selectedCwd\) return;\s*startNewSessionIn\(\{ cwd: selectedCwd \}\);/);
+  // The header "+" follows an explicit classic project filter; otherwise it keeps the cwd.
+  assert.match(callbackBody("handleNewSession"), /if \(!newSessionTarget\) return;\s*startNewSessionIn\(newSessionTarget\);/);
+  assert.match(source, /const newSessionProject = listView === "chronological" && sidebarTab === "sessions" && !archiveView/);
+  assert.match(source, /newSessionTargetForProject\(newSessionProject, selectedCwd\)/);
+  assert.match(source, /disabled=\{!newSessionTarget\}/);
+  assert.match(source, /path: newSessionTarget.cwd/);
   assert.match(source, /onNewSession\?: \(sessionId: string, cwd: string, projectKey\?: string \| null, options\?: NewSessionOptions\) => void;/);
 });
 
@@ -499,7 +503,7 @@ test("a group's + starts a session at once, in the sidebar's worktree for the cu
 });
 
 test("the composer's bar moves through a handle made once, with the newest closures", () => {
-  const handle = source.slice(source.indexOf("useImperativeHandle(controlRef"), source.indexOf("// Header \"+\""));
+  const handle = source.slice(source.indexOf("useImperativeHandle(controlRef"), source.indexOf("const recentProjects"));
   assert.match(source, /const startNewSessionInRef = useRef\(startNewSessionIn\);\s*startNewSessionInRef\.current = startNewSessionIn;/);
   assert.match(handle, /startNewSessionIn: \(target\) => startNewSessionInRef\.current\(target\),/);
   assert.match(handle, /openFolderForNewSession: \(onPicked, returnFocusTo\) => \{\s*folderPickRef\.current = onPicked;\s*folderReturnFocusRef\.current = returnFocusTo;\s*setCustomPathError\(null\);\s*setCustomPathOpen\("new-session"\);/);
@@ -597,7 +601,7 @@ test("the footer opens the project list in the files tab; the archive view repla
   assert.match(source, /onOpenOtherProject: handleOpenOtherProject,/);
   assert.match(source, /onOpenArchive: openArchiveView,/);
   assert.match(callbackBody("openArchiveView"), /setArchiveView\(true\);[\s\S]*?setSessionSearchOpen\(false\);\s*switchTab\("sessions"\);/);
-  assert.match(source, /<div className="sidebar-sessions-view" hidden=\{archiveView\}>\s*<SessionTree\s+\{\.\.\.treeProps\}\s+rows=\{model\.rows\}\s+emptyLabel=\{t\("sidebar\.noSessions"\)\}\s+reveal=\{treeReveal\}\s+onRevealHandled=\{handleRevealHandled\}\s+\/>/);
+  assert.match(source, /<div className="sidebar-sessions-view" hidden=\{archiveView\}>[\s\S]*?<SessionTree\s+\{\.\.\.treeProps\}\s+rows=\{mainRows\}\s+emptyLabel=\{t\("sidebar\.noSessions"\)\}\s+reveal=\{treeReveal\}\s+onRevealHandled=\{handleRevealHandled\}\s+\/>/);
   assert.match(source, /<SessionTree \{\.\.\.treeProps\} rows=\{archiveRows\} emptyLabel=\{t\("sidebar\.noArchived"\)\} \/>/);
   assert.match(source, /const sessionMenuItems = \(row: SessionRow\): SidebarMenuItem\[\] => sessionMenuEntries\(row\.context, row\.status\)/);
   assert.match(callbackBody("handleTogglePinned"), /setPinnedCollapsed\(next\);\s*savePinnedCollapsed\(next\);/);

@@ -181,10 +181,24 @@ test("an idle session row shows its short time, branch and both actions", () => 
   assert.match(html, /^<div class="session-tree-row session-tree-session" style="top:0;height:32px" data-row-key="session:group:idle">/);
   // Nothing before the title: it gets the room; the time sits at the right.
   assert.match(html, /<button type="button" class="session-tree-main" title="[^"]*"><span class="session-tree-title">first idle<\/span><span class="session-tree-branch">⑂ feat\/rows<\/span><span class="session-tree-meta">5m<\/span>/);
-  assert.match(html, /title="first idle\n3 msgs · 5 minutes ago · ⑂ feat\/rows"/);
+  assert.match(html, /title="first idle\n\/work\/app\n3 msgs · 5 minutes ago · ⑂ feat\/rows"/);
   assert.match(html, /class="session-tree-action session-tree-quick-action" aria-label="Archive" title="Archive"/);
   assert.match(html, /class="session-tree-action session-tree-more-action" aria-label="More actions" title="More actions" aria-haspopup="menu" aria-expanded="false"/);
   assert.doesNotMatch(html, /aria-current/);
+});
+
+test("classic rows keep project labels alongside time, running and unread states", () => {
+  for (const status of [{}, { running: true }, { unread: true }]) {
+    const row = { ...sessionRow(session("classic"), { status }), showProject: true };
+    const html = rowMarkup(render({ rows: [row] }), row.key);
+    assert.match(html, /has-project-label/);
+    assert.match(html, /height:48px/);
+    assert.match(html, /<span class="session-tree-project-label" title="\/work\/app">app<\/span>/);
+    assert.match(html, /session-tree-meta/);
+    const mobile = rowMarkup(render({ rows: [row], layout: "mobile" }), row.key);
+    assert.match(mobile, /height:56px/);
+    assert.match(mobile, /session-tree-project-label/);
+  }
 });
 
 test("a branch chip needs a linked worktree", () => {
@@ -272,7 +286,7 @@ test("the phone layout uses tall rows, keeps ⋯ and drops the archive quick but
 
 test("a summary row without details shows an ellipsis instead of a message count", () => {
   const html = render({ rows: [sessionRow(session("p", { detailsPending: true, name: "Named" }))] });
-  assert.match(html, /title="Named\n… · 5 minutes ago"/);
+  assert.match(html, /title="Named\n\/work\/app\n… · 5 minutes ago"/);
 });
 
 test("rename mode swaps the row for a field seeded with the title", () => {

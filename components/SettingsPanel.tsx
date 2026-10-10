@@ -35,6 +35,7 @@ import { PluginsConfig } from "./PluginsConfig";
 import { McpConfig } from "./McpConfig";
 import { ConfigButton, ConfigSwitch } from "./SettingsUi";
 import { FontSettings } from "./FontSettings";
+import { useSessionListView, setSessionListView } from "@/hooks/useSessionListView";
 
 interface Props {
   cwd: string | null;
@@ -82,6 +83,7 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
   const { preference, setThemePreference } = useTheme();
   const { width: chatContentWidth, setWidth: setChatContentWidth, fontSize, setFontSize } = useChatAppearance();
   const enterSendMode = useEnterSendMode();
+  const sessionListView = useSessionListView();
   const [shellSettings, setShellSettings] = useState<ToolSettingsResponse | null>(null);
   const [shellSaving, setShellSaving] = useState(false);
   const [shellError, setShellError] = useState<string | null>(null);
@@ -198,6 +200,20 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
               </label>
             );
           })}
+        </div>
+      </section>
+
+      <section className="settings-general-section">
+        <h3 className="settings-general-heading">{t("settings.sessionList")}</h3>
+        <p className="settings-general-description">{t("settings.sessionListDescription")}</p>
+        <div role="radiogroup" aria-label={t("settings.sessionList")} className="settings-theme-options">
+          {(["projects", "chronological"] as const).map((view) => (
+            <label key={view} className="settings-theme-option">
+              <input type="radio" name="session-list-view" value={view} checked={sessionListView === view}
+                onChange={() => setSessionListView(view)} className="sr-only" />
+              <span className="settings-theme-option-label">{t(view === "projects" ? "settings.sessionsByProject" : "settings.sessionsByTime")}</span>
+            </label>
+          ))}
         </div>
       </section>
 

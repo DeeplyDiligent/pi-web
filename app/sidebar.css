@@ -17,6 +17,20 @@
   min-height: 0;
 }
 
+.session-project-filter {
+  flex: none;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.session-project-filter .project-picker-button {
+  min-height: 32px;
+}
+
+@media (pointer: coarse) {
+  .session-project-filter .project-picker-button { min-height: 44px; }
+}
+
 .session-tree-message {
   flex: none;
   padding: 16px 14px;
@@ -192,6 +206,29 @@
   height: 100%;
   padding: 0;
   text-align: left;
+}
+
+.has-project-label .session-tree-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-content: center;
+  column-gap: 6px;
+  row-gap: 2px;
+}
+
+.has-project-label .session-tree-title { grid-area: 1 / 1; }
+.has-project-label .session-tree-meta { grid-area: 1 / 2; }
+.has-project-label .session-tree-branch { grid-area: 2 / 2; }
+
+.session-tree-project-label {
+  grid-area: 2 / 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .session-tree-unread {

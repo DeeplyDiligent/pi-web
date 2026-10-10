@@ -12,10 +12,13 @@ import {
   buildSessionTree,
   familiesToArchive,
   familyIds,
+  filterSessionRows,
+  sessionRowProjects,
   isFamilyArchived,
   isGroupExpanded,
   keepOutgoingGroupOpen,
   nextProjectKeysToRecord,
+  newSessionTargetForProject,
   showLessFamilies,
   showMoreFamilies,
   type SidebarProject,
@@ -33,6 +36,7 @@ import {
   saveSidebarTab,
   type SidebarTab,
 } from "@/lib/sidebar-prefs";
+import { useSessionListView } from "@/hooks/useSessionListView";
 import { forkFailureMessage, sessionMenuEntries, type SessionMenuActionId } from "@/lib/sidebar-actions";
 import { splitBeforeForkSuffix } from "@/lib/session-fork-name";
 import {
@@ -61,6 +65,7 @@ import { DismissButton } from "./DismissButton";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { ProjectWorktreePicker, type ProjectWorktreePickerHandle, type WorktreeRemoval } from "./ProjectWorktreePicker";
 import { SessionSearch } from "./SessionSearch";
+import { SessionProjectFilter } from "./SessionProjectFilter";
 import { SessionTree, sessionRowTitle, type SessionTreeReveal } from "./SessionTree";
 import { SidebarMenu, type SidebarMenuAnchor, type SidebarMenuItem } from "./SidebarMenu";
 import { SidebarToast, type SidebarToastAction, type SidebarToastData } from "./SidebarToast";
@@ -1107,12 +1112,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     createWorktree,
   }), [createWorktree, refreshWorktrees]);
 
-  // Header "+": a new session in the sidebar's current cwd (worktree).
-  const handleNewSession = useCallback(() => {
-    if (!selectedCwd) return;
-    startNewSessionIn({ cwd: selectedCwd });
-  }, [selectedCwd, startNewSessionIn]);
-
   const recentProjects = useMemo(() => getRecentProjects(allSessions), [allSessions]);
 
   const sessionFamilies = useMemo(() => listSessionFamilies(allSessions), [allSessions]);
@@ -1184,6 +1183,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     () => (currentProjectKey && currentProjectRoot ? { key: currentProjectKey, root: currentProjectRoot } : null),
     [currentProjectKey, currentProjectRoot],
   );
+  const listView = useSessionListView();
+  // Start with All on each page load. This filter never adopts the selected chat's project.
+  const [sessionProjectFilter, setSessionProjectFilter] = useState<string | null>(null);
   const model = useMemo(() => buildSessionTree({
     sessions: allSessions,
     uiState,
@@ -1194,7 +1196,23 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     groupExpansion,
     moreShown,
     pinnedCollapsed,
-  }), [allSessions, uiState, runningSessionIds, unreadSessionIds, selectedSessionId, currentProject, groupExpansion, moreShown, pinnedCollapsed]);
+    listView,
+  }), [allSessions, uiState, runningSessionIds, unreadSessionIds, selectedSessionId, currentProject, groupExpansion, moreShown, pinnedCollapsed, listView]);
+  const filterProjects = useMemo(() => sessionRowProjects(model.rows), [model.rows]);
+  // A deleted/archived project's last chat must not leave an invisible filter active.
+  const activeProjectFilter = filterProjects.some((project) => project.key === sessionProjectFilter)
+    ? sessionProjectFilter : null;
+  const newSessionProject = listView === "chronological" && sidebarTab === "sessions" && !archiveView
+    ? filterProjects.find((project) => project.key === activeProjectFilter) ?? null : null;
+  const newSessionTarget = useMemo(() => newSessionTargetForProject(newSessionProject, selectedCwd), [newSessionProject, selectedCwd]);
+  // Header "+": the explicit project filter wins over the currently open chat.
+  const handleNewSession = useCallback(() => {
+    if (!newSessionTarget) return;
+    startNewSessionIn(newSessionTarget);
+  }, [newSessionTarget, startNewSessionIn]);
+  const mainRows = useMemo(() => listView === "chronological"
+    ? filterSessionRows(model.rows, activeProjectFilter) : model.rows,
+  [model.rows, listView, activeProjectFilter]);
   const archiveRows = useMemo(() => (archiveView ? buildArchiveRows({
     sessions: allSessions,
     uiState,
@@ -1564,6 +1582,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       setArchiveView(false);
     }
     const groupKey = workspaceKeyOf(forked);
+    if (sessionProjectFilter !== null && sessionProjectFilter !== groupKey) setSessionProjectFilter(null);
     if (Object.hasOwn(groupExpansion, groupKey) && groupExpansion[groupKey] === false) {
       const next = { ...groupExpansion };
       // Re-inserted, so the choice counts as the newest one kept.
@@ -1741,7 +1760,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   // A row whose menu is open can leave the tree (archived or deleted in
   // another window): its menu goes with it.
-  const visibleRows = archiveView ? archiveRows : model.rows;
+  const visibleRows = archiveView ? archiveRows : mainRows;
   useEffect(() => {
     if (menu?.kind !== "row") return;
     if (!visibleRows.some((row) => row.key === menu.row.key)) setMenu(null);
@@ -2041,8 +2060,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           type="button"
           className="sidebar-new-button"
           onClick={handleNewSession}
-          disabled={!selectedCwd}
-          title={selectedCwd ? t("sidebar.newSessionTitle", { path: selectedCwd }) : t("sidebar.selectProject")}
+          disabled={!newSessionTarget}
+          title={newSessionTarget ? t("sidebar.newSessionTitle", { path: newSessionTarget.cwd }) : t("sidebar.selectProject")}
         >
           <PlusIcon size={12} />
           <span className="sidebar-new-label">{t("sidebar.new")}</span>
@@ -2113,9 +2132,34 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         >
           {/* Kept mounted under the archive view, so going back finds it as it was. */}
           <div className="sidebar-sessions-view" hidden={archiveView}>
+            {listView === "chronological" && (
+              <SessionProjectFilter
+                key={`${sidebarTab}:${archiveView}`}
+                mobile={isMobile}
+                active={sidebarTab === "sessions" && !archiveView}
+                projects={filterProjects}
+                value={activeProjectFilter}
+                onUseDefaultDirectory={() => {
+                  setSessionProjectFilter(null);
+                  void handleDefaultCwd();
+                }}
+                onOpenFolder={() => {
+                  setSessionProjectFilter(null);
+                  handleCustomPathClick();
+                }}
+                onChange={(projectKey) => {
+                  setSessionProjectFilter(projectKey);
+                  setRenamingRootId(null);
+                  setConfirmDeleteRootId(null);
+                  setMenu(null);
+                  const scroll = sessionsPanelRef.current?.querySelector<HTMLElement>(".sidebar-sessions-view .session-tree-scroll");
+                  if (scroll) scroll.scrollTop = 0;
+                }}
+              />
+            )}
             <SessionTree
               {...treeProps}
-              rows={model.rows}
+              rows={mainRows}
               emptyLabel={t("sidebar.noSessions")}
               reveal={treeReveal}
               onRevealHandled={handleRevealHandled}
