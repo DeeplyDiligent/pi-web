@@ -9,6 +9,11 @@
 ## Sidebar breakpoint (`components/AppShell.tsx`)
 - The mobile drawer starts closed on entering the mobile breakpoint. Desktop open state is remembered separately, seeded from the URL's initial `sidebarCollapsed` value and updated only by explicit desktop toggles. Returning to desktop restores that preference; mobile drawer toggles, backdrop clicks and toolbar actions must not replace it.
 
+## Recording and text-to-speech screen sleep
+- `hooks/useScreenWakeLock.ts` keeps the screen awake through the standard Screen Wake Lock API while `ChatInput` is starting, recording, or transcribing, and while `useSpeechSynthesis` has a speaking key. Completion, cancellation, errors, and unmount release the claim.
+- `lib/screen-wake-lock.ts` shares one sentinel across audio consumers so finishing one does not release the other's lock. Pending requests are checked against current activity and visibility before adoption. Hidden pages release the sentinel; visibility/focus reacquires it only while audio is still active. OS releases and denied requests never trigger a retry loop.
+- This prevents automatic screen sleep where supported, not manual phone locking or background suspension. Unsupported browsers (including Safari before 16.4), battery policies, and denied requests fall back without breaking audio. Do not use silent audio/video hacks to bypass those policies.
+
 ## Completion sound
 - `hooks/useAudio.ts` stores the toggle in `localStorage` as `pi-sound-enabled` and reuses one `AudioContext`.
 - Autoplay policy requires unlocking sound from a user gesture: `ChatInput` calls the unlock hook from interactive controls, and `ChatWindow` plays the tone from `onAgentEnd`.

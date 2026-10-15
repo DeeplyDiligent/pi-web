@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { prepareSpeechText } from "@/lib/speech-text";
+import { useScreenWakeLock } from "@/hooks/useScreenWakeLock";
 
 const AUTO_READ_STORAGE_KEY = "pi-auto-read-responses";
 const MAX_UTTERANCE_CHARS = 1800;
@@ -26,6 +27,7 @@ export function useSpeechSynthesis(locale: string) {
   const [supported, setSupported] = useState(false);
   const [speakingKey, setSpeakingKey] = useState<string | null>(null);
   const generationRef = useRef(0);
+  useScreenWakeLock(speakingKey !== null);
 
   useEffect(() => {
     setSupported("speechSynthesis" in window && "SpeechSynthesisUtterance" in window);

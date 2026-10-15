@@ -27,6 +27,7 @@ import { isBareMcpCommand, isBuiltinMcpCommand } from "@/lib/mcp-command";
 import { FolderIcon, getFileIcon } from "./FileIcons";
 import { ImagePreview } from "./ImagePreview";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useScreenWakeLock } from "@/hooks/useScreenWakeLock";
 import { useEnterSendMode } from "@/hooks/useEnterSendMode";
 import { useI18n } from "@/hooks/useI18n";
 import { useChatAppearance } from "@/hooks/useChatAppearance";
@@ -673,6 +674,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const enterSendMode = useEnterSendMode();
   const [value, setValue] = useState(() => (draftKey ? getDraft(draftKey)?.value ?? "" : ""));
   const [speechStatus, setSpeechStatus] = useState<"idle" | "starting" | "recording" | "transcribing">("idle");
+  useScreenWakeLock(speechStatus !== "idle");
   const [speechError, setSpeechError] = useState<string | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [attachmentUploadCount, setAttachmentUploadCount] = useState(0);
