@@ -6,12 +6,12 @@ const source = await readFile(new URL("./ChatWindow.tsx", import.meta.url), "utf
 const branding = source.slice(source.indexOf("{isEmptyNew && ("), source.indexOf("{chatInputElement}"));
 
 test("new-chat branding uses the runtime blue/work icon without optimizer caching", () => {
-  assert.match(branding, /<Image src="\/app-icons\/apple-touch-icon\.png" width=\{32\} height=\{32\} alt="" priority unoptimized/);
+  assert.match(branding, /<Image src="\/app-icons\/apple-touch-icon\.png" width=\{40\} height=\{40\} alt="" priority unoptimized/);
   assert.doesNotMatch(branding, /src="\/icons\/apple-touch-icon\.png"/);
 });
 
-test("new-chat branding aligns with the fork's mobile and desktop composer gutters", () => {
-  assert.match(branding, /paddingLeft: isMobile \? 8 : 16, paddingRight: isMobile \? 8 : 52/);
-  assert.match(branding, /className="new-session-hero-row" style=\{\{ maxWidth: "var\(--chat-content-max-width, 820px\)"/);
-  assert.match(branding, /className="new-session-brand" style=\{\{ gap: isMobile \? 7 : 10/);
+test("new-chat branding uses the upstream header layout and composer width", () => {
+  assert.match(branding, /paddingLeft: 16, paddingRight: isMobile \? 16 : 52/);
+  assert.match(branding, /className="new-session-hero-inner" style=\{\{ maxWidth: "var\(--chat-content-max-width, 820px\)"/);
+  assert.match(branding, /className="new-session-brand"/);
 });

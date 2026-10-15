@@ -6,11 +6,20 @@ export const THINKING_EXPANDED_EVENT = "pi-thinking-expanded-changed";
 
 export function isThinkingExpandedByDefault(): boolean {
   if (typeof window === "undefined") return true;
-  // Preserve the fork's expanded default, while respecting an explicit choice.
-  return window.localStorage.getItem(STORAGE_KEY) !== "false";
+  try {
+    // Preserve the fork's expanded default and respect an explicit choice.
+    return window.localStorage.getItem(STORAGE_KEY) !== "false";
+  } catch {
+    return true;
+  }
 }
 
 export function setThinkingExpandedByDefault(expanded: boolean): void {
-  window.localStorage.setItem(STORAGE_KEY, String(expanded));
+  try {
+    window.localStorage.setItem(STORAGE_KEY, String(expanded));
+  } catch {
+    // Nothing was saved, so there is no change to announce.
+    return;
+  }
   window.dispatchEvent(new Event(THINKING_EXPANDED_EVENT));
 }

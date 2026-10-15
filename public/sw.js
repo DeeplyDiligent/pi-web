@@ -5,7 +5,6 @@ const STATIC_CACHE = `${CACHE_PREFIX}-static-${CACHE_VERSION}`;
 const OFFLINE_URL = "/offline.html";
 const PRECACHE_URLS = [
   OFFLINE_URL,
-  "/manifest.webmanifest",
   "/icons/icon-blue-v1-192.png",
   "/icons/icon-blue-v1-512.png",
   "/icons/icon-blue-v1-maskable-512.png",
@@ -14,6 +13,9 @@ const PRECACHE_URLS = [
   "/icons/icon-maroon-v2-work-512.png",
   "/icons/icon-maroon-v2-work-maskable-512.png",
   "/icons/apple-touch-icon-maroon-v2-work.png",
+  "/icons/icon-192.png",
+  "/icons/icon-512.png",
+  "/icons/apple-touch-icon.png",
 ];
 // A reachable port backed by a dead upstream accepts the connection and then
 // never answers: fetch() neither resolves nor rejects, so the navigation hangs
@@ -55,32 +57,14 @@ self.addEventListener("fetch", (event) => {
   // Session data and live agent traffic must always come from the local server.
   if (url.pathname.startsWith("/api/") || url.pathname === "/sw.js") return;
 
+  // The manifest is runtime configuration. Bypass even entries left in an old
+  // cache, including requests with a query string or navigation mode.
+  if (url.pathname === "/manifest.webmanifest") return;
+
   if (request.mode === "navigate") {
     event.respondWith(
       fetchWithTimeout(request, NAVIGATION_TIMEOUT_MS).catch(async () => {
         const fallback = await caches.match(OFFLINE_URL);
-        return fallback ?? Response.error();
-      }),
-    );
-    return;
-  }
-
-  // Installation metadata must refresh even when the app version is unchanged.
-  // Cache-first would keep an old Android launch/status-bar colour indefinitely.
-  if (url.pathname === "/manifest.webmanifest") {
-    event.respondWith(
-      fetch(request).then(async (response) => {
-        if (response.ok) {
-          try {
-            const cache = await caches.open(STATIC_CACHE);
-            await cache.put(request, response.clone());
-          } catch {
-            // A full/disabled cache must not hide a fresh online manifest.
-          }
-        }
-        return response;
-      }).catch(async () => {
-        const fallback = await caches.match(request);
         return fallback ?? Response.error();
       }),
     );

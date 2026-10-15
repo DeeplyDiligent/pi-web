@@ -6,10 +6,11 @@ export const dynamic = "force-dynamic";
 
 export default function manifest(): MetadataRoute.Manifest {
   const icons = getAppIcons();
+  const appName = process.env.PI_WEB_APP_NAME?.trim() || "Pi Web";
   return {
     id: "/",
-    name: "Pi Web",
-    short_name: "Pi Web",
+    name: appName,
+    short_name: appName,
     description: "Local web interface for the pi coding agent",
     start_url: "/",
     scope: "/",

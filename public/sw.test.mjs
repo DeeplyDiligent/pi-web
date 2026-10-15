@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 
 const listeners = new Map();
-globalThis.caches = { match: async () => undefined, open: async () => ({ put: async () => {} }) };
 globalThis.self = {
   location: {
     href: "https://pi.test/sw.js?v=test",
@@ -13,35 +12,6 @@ globalThis.self = {
 };
 
 await import("./sw.js");
-
-test("manifest checks the network instead of serving stale installation metadata", async (t) => {
-  const fresh = new Response(JSON.stringify({ theme_color: "#ffffff" }));
-  t.mock.method(globalThis, "fetch", async () => fresh);
-  t.mock.method(caches, "match", async () => assert.fail("online manifest must not be cache-first"));
-  let saved;
-  t.mock.method(caches, "open", async () => ({
-    put: async (_request, response) => { saved = await response.json(); },
-  }));
-  const { pending, background } = dispatchFetch("/manifest.webmanifest");
-  const response = await pending;
-  await Promise.all(background);
-  assert.equal((await response.json()).theme_color, "#ffffff");
-  assert.equal(saved.theme_color, "#ffffff", "offline fallback must refresh too");
-});
-
-test("a cache write failure does not hide the live manifest", async (t) => {
-  const fresh = new Response(JSON.stringify({ theme_color: "#ffffff" }));
-  t.mock.method(globalThis, "fetch", async () => fresh);
-  t.mock.method(caches, "open", async () => { throw new Error("quota"); });
-  assert.equal(await dispatchFetch("/manifest.webmanifest").pending, fresh);
-});
-
-test("manifest retains a cached fallback offline", async (t) => {
-  const cached = new Response(JSON.stringify({ name: "Pi Web" }));
-  t.mock.method(globalThis, "fetch", async () => { throw new Error("offline"); });
-  t.mock.method(caches, "match", async () => cached);
-  assert.equal(await dispatchFetch("/manifest.webmanifest").pending, cached);
-});
 
 function dispatchNotificationClick(data) {
   let pending;
@@ -188,7 +158,7 @@ function installOfflineStub() {
 function dispatchFetch(url, { mode = "cors", method = "GET" } = {}) {
   let pending;
   const background = [];
-  const request = new Request(new URL(url, self.location.origin), { method });
+  const request = new Request(url, { method });
   Object.defineProperty(request, "mode", { value: mode });
   listeners.get("fetch")({
     request,
@@ -197,6 +167,62 @@ function dispatchFetch(url, { mode = "cors", method = "GET" } = {}) {
   });
   return { pending, background };
 }
+
+test("install precaches offline assets but not the runtime manifest", async () => {
+  let pending;
+  let precached;
+  let skipped = false;
+  globalThis.caches = {
+    open: async () => ({ addAll: async (urls) => { precached = urls; } }),
+  };
+  self.skipWaiting = async () => { skipped = true; };
+  listeners.get("install")({ waitUntil: (promise) => { pending = promise; } });
+  await pending;
+
+  assert.deepEqual(precached, [
+    "/offline.html",
+    "/icons/icon-blue-v1-192.png",
+    "/icons/icon-blue-v1-512.png",
+    "/icons/icon-blue-v1-maskable-512.png",
+    "/icons/apple-touch-icon-blue-v1.png",
+    "/icons/icon-maroon-v2-work-192.png",
+    "/icons/icon-maroon-v2-work-512.png",
+    "/icons/icon-maroon-v2-work-maskable-512.png",
+    "/icons/apple-touch-icon-maroon-v2-work.png",
+    "/icons/icon-192.png",
+    "/icons/icon-512.png",
+    "/icons/apple-touch-icon.png",
+  ]);
+  assert.equal(skipped, true);
+});
+
+test("manifest requests bypass the worker even with query strings and old cached entries", async () => {
+  const stale = new Response('{"name":"Old Pi"}');
+  let cacheReads = 0;
+  globalThis.caches = {
+    match: async () => { cacheReads++; return stale.clone(); },
+    open: async () => assert.fail("manifest must not be cached"),
+  };
+  const networkRequests = [];
+  globalThis.fetch = async (request) => {
+    networkRequests.push(request.url);
+    return new Response('{"name":"New Pi"}');
+  };
+
+  for (const path of ["/manifest.webmanifest", "/manifest.webmanifest?v=old"]) {
+    for (const mode of ["cors", "navigate"]) {
+      const url = `https://pi.test${path}`;
+      const { pending, background } = dispatchFetch(url, { mode });
+      assert.equal(pending, undefined, "no respondWith: leave the request to the browser");
+      assert.deepEqual(background, []);
+      // Model the browser's normal network fallback when respondWith is absent.
+      const response = await fetch(new Request(url));
+      assert.deepEqual(await response.json(), { name: "New Pi" });
+    }
+  }
+  assert.equal(cacheReads, 0, "old cached manifests must never be read");
+  assert.equal(networkRequests.length, 4);
+});
 
 /** fetch() that never settles until the signal it was handed is aborted. */
 function installHungNetwork() {

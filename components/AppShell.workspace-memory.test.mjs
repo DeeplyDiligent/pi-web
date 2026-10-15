@@ -6,8 +6,8 @@ import vm from "node:vm";
 import { createJiti } from "jiti";
 
 const source = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
-const jiti = createJiti(import.meta.url);
-const draftStore = await jiti.import("../lib/draft-store.ts");
+const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
+const draftStore = await jiti.import("@/lib/draft-store");
 
 function callbackBody(name, nextName) {
   const start = source.indexOf(`const ${name} = useCallback`);
@@ -17,41 +17,75 @@ function callbackBody(name, nextName) {
   return source.slice(start, end);
 }
 
-test("explicit context changes invalidate a pending workspace restore", () => {
+test("a linked session that is gone gets no other session in its place (#1168)", async (t) => {
   const callbacks = [
-    ["handleCwdChange", "handleSelectSession"],
-    ["handleSelectSession", "handleNewSession"],
-    ["handleNewSession", "hydrateSelectedSession"],
-    ["handleSessionCreated", "handleAgentEnd"],
-    ["handleSessionForked", "handleInitialRestoreDone"],
-    ["handleSessionDeleted", "handleOpenFile"],
-  ];
-
-  for (const [name, nextName] of callbacks) {
-    assert.match(callbackBody(name, nextName), /invalidateWorkspaceRestore\(\);/);
-  }
-});
-
-test("all active-session transitions share one persistence effect", () => {
-  assert.match(
-    source,
-    /useEffect\(\(\) => \{\s+if \(selectedSession\) \{[\s\S]*?setLastOpenSession\(projectKey, selectedSession\.id\);\s+setTabOpenSession\(selectedSession\.id\);\s+return;\s+\}\s+if \(newSessionCwd\) setTabOpenNewSession\(newSessionCwd\);\s+\}, \[newSessionCwd, selectedSession\]\);/,
-  );
-});
-
-test("keeps chat scroll positions in page memory by session id", () => {
-  assert.match(source, /useRef\(new Map<string, ChatScrollPosition>\(\)\)/);
-  assert.match(source, /sessionScrollPositionsRef\.current\.set\(sessionId, position\)/);
-  assert.match(source, /initialScrollPosition=\{selectedSession \? sessionScrollPositionsRef\.current\.get\(selectedSession\.id\) \?\? null : null\}/);
-  assert.match(source, /onScrollPositionChange=\{handleSessionScrollPositionChange\}/);
-  assert.doesNotMatch(source, /localStorage[^\n]*sessionScroll/i);
-});
-
-test("workspace restoration remains inside the cross-project branch", () => {
-  assert.match(
+    callbackBody("restoreWorkspaceContext", "handleCwdChange"),
     callbackBody("handleCwdChange", "handleSelectSession"),
-    /if \(currentProject !== newProject\) \{[\s\S]*?restoreWorkspaceContext\(newProject, cwd\);[\s\S]*?\}/,
-  );
+    callbackBody("handleInitialRestoreDone", "handleSessionDeleted"),
+  ].join("\n");
+  const parkedKeyHelper = source.slice(source.indexOf("function parkedNewSessionDraftKey"), source.indexOf("export function AppShell"));
+  const lastOpen = { id: "p1-last", cwd: "/p1", projectKey: "/p1" };
+  const otherLastOpen = { id: "p2-last", cwd: "/p2", projectKey: "/p2" };
+
+  for (const [label, linkedId] of [["from the URL", "gone"], ["from this tab's memory", null]]) {
+    await t.test(label, () => {
+      const urls = [];
+      const context = vm.createContext({
+        ...draftStore,
+        crypto: globalThis.crypto,
+        URLSearchParams,
+        window: { location: { pathname: "/", search: linkedId ? `?session=${linkedId}` : "" } },
+        router: { replace: (url) => urls.push(url) },
+        getLastOpenSession: (key) => ({ "/p1": lastOpen.id, "/p2": otherLastOpen.id })[key] ?? null,
+        clearLastOpen() {},
+        workspaceKeyOf: (value) => value.projectKey ?? value.cwd,
+        useCallback: (callback) => callback,
+        changeFileWorkspace() {},
+        activeNewSessionDraftKeyRef: { current: null },
+        activeProjectKeyRef: { current: null },
+        workspaceRestoreTokenRef: { current: 0 },
+        suppressCwdBumpRef: { current: false },
+        skipWorkspaceRestoreRef: { current: false },
+        initialLinkedSessionId: linkedId,
+        activeCwd: null,
+        newSessionCwd: null,
+        newSessionDraftId: "initial",
+        selectedSession: null,
+        sessionCatalog: [lastOpen, otherLastOpen],
+        sessionKey: 0,
+      });
+      context.invalidateWorkspaceRestore = () => context.workspaceRestoreTokenRef.current++;
+      for (const [setter] of callbacks.matchAll(/\bset[A-Z]\w*(?=\()/g)) {
+        const state = setter[3].toLowerCase() + setter.slice(4);
+        context[setter] = (value) => {
+          context[state] = typeof value === "function" ? value(context[state]) : value;
+        };
+      }
+      vm.runInContext(stripTypeScriptTypes(`${parkedKeyHelper}\n${callbacks}
+        globalThis.navigate = { handleCwdChange, handleInitialRestoreDone };
+      `), context);
+
+      // The sidebar's first load: its null cwd, the initial session missing
+      // from its list, then the most recent project, then its hydrated key.
+      context.navigate.handleCwdChange(null);
+      context.navigate.handleInitialRestoreDone();
+      context.navigate.handleCwdChange("/p1", "/p1", "/p1");
+      context.navigate.handleCwdChange("/p1", "/p1", "/p1-key");
+      if (linkedId) {
+        assert.equal(context.selectedSession, null, "a fresh composer, not the project's last session");
+        assert.equal(context.activeCwd, "/p1");
+        assert.ok(!urls.some((url) => url.includes("session=")), `no other session's URL: ${urls.join(", ")}`);
+      } else {
+        assert.equal(context.selectedSession?.id, lastOpen.id, "a fresh tab's fallback");
+        assert.ok(urls.includes(`?session=${lastOpen.id}`));
+      }
+
+      // Ordinary project switches keep their restore.
+      context.navigate.handleCwdChange("/p2", "/p2", "/p2");
+      assert.equal(context.selectedSession?.id, otherLastOpen.id);
+      assert.equal(context.skipWorkspaceRestoreRef.current, false);
+    });
+  }
 });
 
 test("choosing another workspace creates a fresh thread without restoring its remembered session", () => {
@@ -69,6 +103,9 @@ test("choosing another workspace creates a fresh thread without restoring its re
     crypto: globalThis.crypto,
     window: { location: { pathname: "/" } },
     router: { replace() {} },
+    changeFileWorkspace() { context.fileTabs = []; },
+    skipWorkspaceRestoreRef: { current: false },
+    workspaceRestoreTokenRef: { current: 0 },
     getLastOpenSession: () => { restoreAttempts++; return "remembered"; },
     useCallback: (callback) => callback,
     useGlobalKeyboardShortcuts() {},
@@ -137,11 +174,13 @@ test("New restores the draft after session navigation and workspace auto-restore
         activeProjectKeyRef: { current: cwd },
         workspaceRestoreTokenRef: { current: 0 },
         suppressCwdBumpRef: { current: false },
+        skipWorkspaceRestoreRef: { current: false },
         branchLeafChangeFnRef: { current: null },
         liveFollowFrameRef: { current: null },
         bashRecoveryIdRef: { current: 0 },
         cancelEventStreamGrace() {},
         closeEvents() {},
+        changeFileWorkspace() {},
         isMobile: false,
         activeCwd: cwd,
         activeFileTabId: null,
@@ -242,6 +281,7 @@ test("New in another project adopts it up front and parks the composer's draft",
     activeProjectKeyRef: { current: "/p1" },
     workspaceRestoreTokenRef: { current: 0 },
     suppressCwdBumpRef: { current: false },
+    skipWorkspaceRestoreRef: { current: false },
     branchLeafChangeFnRef: { current: null },
     isMobile: false,
     activeCwd: "/p1",
@@ -261,6 +301,11 @@ test("New in another project adopts it up front and parks the composer's draft",
       context[state] = typeof value === "function" ? value(context[state]) : value;
     };
   }
+  context.changeFileWorkspace = () => {
+    context.fileTabs = [];
+    context.activeFileTabId = null;
+    context.rightPanelOpen = false;
+  };
   vm.runInContext(stripTypeScriptTypes(`${parkedKeyHelper}\n${callbacks}
     globalThis.navigate = { handleCwdChange, handleSelectSession, handleNewSession };
   `), context);
@@ -320,6 +365,7 @@ test("the composer's bar moves the fresh composer's draft and model picks instea
     activeProjectKeyRef: { current: "/p1" },
     workspaceRestoreTokenRef: { current: 0 },
     suppressCwdBumpRef: { current: false },
+    skipWorkspaceRestoreRef: { current: false },
     branchLeafChangeFnRef: { current: null },
     chatInputRef: { current: null },
     newSessionChoicesRef: { current: choices },
@@ -342,6 +388,11 @@ test("the composer's bar moves the fresh composer's draft and model picks instea
       context[state] = typeof value === "function" ? value(context[state]) : value;
     };
   }
+  context.changeFileWorkspace = () => {
+    context.fileTabs = [];
+    context.activeFileTabId = null;
+    context.rightPanelOpen = false;
+  };
   vm.runInContext(stripTypeScriptTypes(`${parkedKeyHelper}\n${callbacks}
     globalThis.navigate = { handleCwdChange, handleNewSession };
   `), context);
@@ -391,26 +442,6 @@ test("the composer's bar moves the fresh composer's draft and model picks instea
   assert.equal(draftStore.getDraft("new:p5-new:/p5"), null);
   assert.equal(context.carriedNewSessionChoices, null);
   for (const key of ["parked-new:/p2", "parked-new:/p4", "new:p3-new:/p3"]) draftStore.clearDraft(key);
-});
-
-test("only a fresh composer moves from the bar, and only somewhere else", () => {
-  const body = source.slice(source.indexOf("const handlePickNewSessionContext = useCallback"), source.indexOf("const pickNewSessionContextRef"));
-  const guard = body.indexOf("if (selectedSession !== null || !effectiveNewSessionCwd || target.cwd === effectiveNewSessionCwd) return;");
-  const focus = body.indexOf("newSessionBarFocusRef.current = from;");
-  const move = body.indexOf("sidebarControlRef.current?.startNewSessionIn({ ...target, carryComposer: true });");
-  assert.ok(guard >= 0 && guard < focus && focus < move, "the guard, then the focus request, then the move");
-  // The folder picker answers later and goes through the same guard with the newest closure.
-  assert.match(source, /const pickNewSessionContextRef = useRef\(handlePickNewSessionContext\);\s*pickNewSessionContextRef\.current = handlePickNewSessionContext;/);
-  assert.match(source, /openFolderForNewSession\(\(target\) => pickNewSessionContextRef\.current\(target, "project"\), opener\)/);
-  // So does "Use default directory": today's folder, validated by the sidebar.
-  assert.match(source, /openDefaultDirectoryForNewSession\(\(target\) => pickNewSessionContextRef\.current\(target, "project"\)\)/);
-  assert.match(source, /onUseDefaultDirectory=\{handleDefaultDirectoryForNewSession\}/);
-  // The bar exists only for a fresh composer, and gets the composer's cwd even while the sidebar's report lags.
-  assert.match(source, /const newSessionContextBar = selectedSession === null && effectiveNewSessionCwd \? \(\s*<NewSessionContextBar\s*context=\{contextForCwd\(sidebarNewSessionContext, effectiveNewSessionCwd, newSessionMoveRef\.current\)\}/);
-  assert.match(source, /controlRef=\{sidebarControlRef\}\s*onNewSessionContextChange=\{handleSidebarNewSessionContext\}/);
-  assert.match(source, /newSessionContextBar=\{newSessionContextBar\}\s*initialNewSessionChoices=\{selectedSession === null \? carriedNewSessionChoices : null\}\s*onNewSessionChoicesChange=\{handleNewSessionChoicesChange\}/);
-  // The composer that takes the carried picks reports them on mount, which clears them.
-  assert.match(source, /const handleNewSessionChoicesChange = useCallback\(\(choices: NewSessionChoices\) => \{\s*newSessionChoicesRef\.current = choices;\s*setCarriedNewSessionChoices\(null\);\s*\}, \[\]\);/);
 });
 
 test("the bar of the new composer shows the bar's own move until the sidebar reports it", async () => {

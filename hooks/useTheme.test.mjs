@@ -117,7 +117,7 @@ test("manifest does not pin Android's system bar to one colour", async () => {
   const iconSource = await readFile(new URL("../lib/app-icons.ts", import.meta.url), "utf8");
   const icons = { exports: {}, process: { env: {} } };
   vm.runInNewContext(compile(iconSource), icons);
-  const context = { exports: {}, require: () => icons.exports };
+  const context = { exports: {}, process: { env: {} }, require: () => icons.exports };
   vm.runInNewContext(compile(manifestSource), context);
   const manifest = context.exports.default();
   assert.equal(Object.hasOwn(manifest, "theme_color"), false);

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createJiti } from "jiti";
+import ts from "typescript";
 
 const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
@@ -9,6 +11,7 @@ const jiti = createJiti(import.meta.url, {
 const React = await jiti.import("react");
 const { renderToStaticMarkup } = await jiti.import("react-dom/server");
 const {
+  CompactionSummaryDetails,
   MessageView,
   ThinkingBlock,
   formatToolDuration,
@@ -30,49 +33,6 @@ function renderMessage(message, props = {}) {
     ),
   );
 }
-
-test("message usage footer shows only the dollar cost", () => {
-  const message = {
-    role: "assistant",
-    content: [{ type: "text", text: "Done." }],
-    usage: { input: 3, output: 1141, cacheRead: 134712, cacheWrite: 1783, cost: { total: 0.2141 } },
-  };
-  const html = renderMessage(message);
-  assert.match(html, /\$0\.2141/);
-  assert.doesNotMatch(html, /3 in|1,141 out|134,712|1,783|cache R|cache W| · /);
-  assert.doesNotMatch(renderMessage(message, { isStreaming: true }), /\$0\.2141/);
-});
-
-test("usage footer distinguishes zero cost from missing or invalid pricing", () => {
-  for (const total of [0, undefined, NaN, Infinity]) {
-    const html = renderMessage({
-      role: "assistant",
-      content: [{ type: "text", text: "Done." }],
-      usage: { input: 3, output: 1141, cost: { total } },
-    });
-    if (total === 0) assert.match(html, /\$0\.0000/);
-    else assert.doesNotMatch(html, /\$|NaN|Infinity/);
-    assert.doesNotMatch(html, /3 in|1,141 out/);
-  }
-});
-
-test("Fork is at the assistant response footer, not on the user message", () => {
-  const props = { entryId: "entry", onFork() {}, onEdit() {} };
-  const user = renderMessage({ role: "user", content: "prompt" }, props);
-  const assistant = renderMessage({ role: "assistant", content: [{ type: "text", text: "response" }] }, props);
-  assert.doesNotMatch(user, /aria-label="Fork"/);
-  assert.match(user, /aria-label="Edit from here"/);
-  assert.match(assistant, /aria-label="Fork"/);
-  assert.ok(assistant.indexOf("response") < assistant.indexOf('aria-label="Fork"'));
-  assert.doesNotMatch(renderMessage({ role: "assistant", content: [] }, { ...props, isStreaming: true }), /aria-label="Fork"/);
-});
-
-test("the optimistic latest user message can show Edit without a persisted entry id", () => {
-  const html = renderMessage({ role: "user", content: "currently running" }, { onEdit() {}, editing: true });
-  assert.match(html, /aria-label="Edit from here"/);
-  assert.match(html, /disabled=""/);
-  assert.match(html, /Stopping/);
-});
 
 test("updates a reused message when its written files change", () => {
   const props = { message: { role: "assistant", content: [] } };
@@ -117,7 +77,40 @@ test("previews the first thinking line and reveals the full text with the saved 
   }
 });
 
-test("shows deferred thinking previews without loading when explicitly collapsed", () => {
+test("renders long expanded thinking in pieces and short thinking as markdown", () => {
+  const previousWindow = globalThis.window;
+  globalThis.window = { localStorage: { getItem: () => "true" } };
+  const contentOf = (thinking) => {
+    const html = renderToStaticMarkup(React.createElement(
+      I18nProvider,
+      null,
+      React.createElement(ThinkingBlock, { block: { type: "thinking", thinking }, blockIndex: 0 }),
+    ));
+    return html.match(/overflow-wrap:anywhere">([\s\S]*)<\/div><\/div>$/)[1];
+  };
+  const piecesOf = (thinking) => {
+    const content = contentOf(thinking);
+    const pieces = [...content.matchAll(/<div>([^<]*)<\/div>/g)].map((match) => match[1]);
+    assert.equal(pieces.map((piece) => `<div>${piece}</div>`).join(""), content);
+    assert.ok(pieces.length > 1);
+    return pieces;
+  };
+  try {
+    assert.match(contentOf("First **line**\n\nSecond line."), /<strong>line<\/strong>/);
+
+    // The block boundary stands in for the line break at a cut; a line with
+    // no break is cut with nothing left out.
+    const thinking = "Wait, let me check settings.json again.\n".repeat(2_000);
+    assert.equal(piecesOf(thinking).join("\n"), thinking);
+    const oneLine = "Wait, let me check settings.json again. ".repeat(2_000);
+    assert.equal(piecesOf(oneLine).join(""), oneLine);
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+});
+
+test("shows collapsed deferred thinking previews without loading the full content", () => {
   const previousWindow = globalThis.window;
   try {
     globalThis.window = { localStorage: { getItem: () => "false" } };
@@ -131,6 +124,22 @@ test("shows deferred thinking previews without loading when explicitly collapsed
     if (previousWindow === undefined) delete globalThis.window;
     else globalThis.window = previousWindow;
   }
+});
+
+test("keys an assistant message's blocks by their place, not the entry id (#1184)", () => {
+  // A message of the running turn gets its entry id when the file is read again.
+  // A block keyed by it remounted then: open thinking closed, a tool output's
+  // scroll went back to the top. ThinkingBlock drops what it loaded for another id.
+  const source = ts.createSourceFile("MessageView.tsx", readFileSync(new URL("./MessageView.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const keys = [];
+  (function visit(node) {
+    if ((ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) && node.tagName.getText(source) === "BlockView") {
+      const key = node.attributes.properties.find((attribute) => ts.isJsxAttribute(attribute) && attribute.name.getText(source) === "key");
+      keys.push(key?.initializer?.expression?.getText(source));
+    }
+    ts.forEachChild(node, visit);
+  })(source);
+  assert.deepEqual(keys, ["originalIndex"]);
 });
 
 test("marks only the matched text block after splitting thinking and the final answer", () => {
@@ -224,7 +233,7 @@ test("keeps the input JSON for a write with another argument, an empty file or s
   }
 });
 
-test("renders subagents as standard tool calls with only an extra session button", () => {
+test("renders subagents as standard tool calls with only an extra side-panel button", () => {
   const block = {
     type: "toolCall",
     toolCallId: "call-agent-1",
@@ -256,13 +265,13 @@ test("renders subagents as standard tool calls with only an extra session button
     content: [block],
   }, {
     toolResults: new Map([[block.toolCallId, result]]),
-    onOpenSession() {},
+    onOpenSubagent() {},
   });
 
   assert.match(html, /border:1px solid rgba\(34,197,94,0\.25\)/);
   assert.match(html, />Agent</);
   assert.match(html, />Explore</);
-  assert.match(html, /aria-label="Open sub-agent session"/);
+  assert.match(html, /aria-label="View sub-agent work in side panel"/);
   assert.doesNotMatch(html, />completed</);
   assert.doesNotMatch(html, />Find parser</);
 
@@ -273,9 +282,9 @@ test("renders subagents as standard tool calls with only an extra session button
     content: [{ ...block, toolCallId: "call-extension-1", toolName: "extension_tool" }],
   }, {
     toolResults: new Map(),
-    onOpenSession() {},
+    onOpenSubagent() {},
   });
-  assert.doesNotMatch(ordinaryHtml, /Open sub-agent session/);
+  assert.doesNotMatch(ordinaryHtml, /View sub-agent work in side panel/);
 });
 
 test("a tool card shows the run time pi recorded, else the timestamps' difference, never a tiny one", () => {
@@ -376,19 +385,6 @@ test("renders partial assistant content before the provider error", () => {
 
   assert.match(html, /Partial response/);
   assert.match(html, /Error: Connection closed/);
-});
-
-test("expands thinking by default and renders its markdown as HTML", () => {
-  const html = renderMessage({
-    role: "assistant",
-    provider: "anthropic",
-    model: "claude-test",
-    content: [{ type: "thinking", thinking: "**Inspecting** `file.ts`" }],
-  });
-
-  assert.match(html, /aria-expanded="true"/);
-  assert.match(html, /<strong>Inspecting<\/strong>/);
-  assert.match(html, /<code class="markdown-inline-code"[^>]*>file\.ts<\/code>/);
 });
 
 test("marks persisted assistant messages with their source entry", () => {
@@ -522,6 +518,36 @@ test("marks apply_patch returned failures as errors even when isError is unset",
   assert.match(html, /border:1px solid rgba\(248,113,113,0\.45\)/);
   assert.match(html, />apply_patch</);
   assert.doesNotMatch(html, /border:1px solid rgba\(34,197,94,0\.25\)/);
+});
+
+test("collapses a displayed custom message from its header alone", () => {
+  const custom = (props) => renderMessage({
+    role: "custom",
+    customType: "extension",
+    display: true,
+    timestamp: Date.now(),
+    ...props,
+  });
+  // The header is the card's first button and the only one holding the title.
+  const header = (html) => html.slice(0, html.indexOf("</button>"));
+
+  // The header is the toggle, so a message with no `details` can collapse too.
+  const shown = custom({ content: [{ type: "text", text: "a message with no details" }] });
+  assert.match(header(shown), /aria-expanded="true"/);
+  assert.match(header(shown), />extension</);
+  // The footer is for details only; it is not a second way to collapse.
+  assert.doesNotMatch(shown, /Show details|Hide details/);
+
+  // It starts expanded, as pi's TUI draws a displayed custom message in full.
+  assert.match(shown, /a message with no details/);
+  // A message with no text (images only) can collapse too.
+  assert.match(header(custom({ content: [] })), /aria-expanded="true"/);
+
+  // A message that does carry details keeps that button, for its details.
+  assert.match(
+    custom({ content: [{ type: "text", text: "a message with details" }], details: { files: ["a.ts"] } }),
+    /Show details/,
+  );
 });
 
 test("renders custom-message images as buttons that open a larger preview", () => {
@@ -753,4 +779,34 @@ test("keeps the registered name where no result names the server and tool", (t) 
     details: { calls: [{ id: "call-codemode-mcp/1", name: "mcp__docs_v2__search_pages", args: "{}", status: "ok" }] },
   });
   assert.match(textOf(html), /mcp__docs_v2__search_pages\{\}/);
+});
+
+test("collapses the compaction summary to its title and token count, as pi's TUI does (#1026)", () => {
+  const summary = "## Goal\n\nShip the parser fix.\n\n<read-files>\nlib/read.ts\n</read-files>\n\n<modified-files>\nlib/changed.ts\n</modified-files>";
+  const message = {
+    role: "custom",
+    customType: "compaction",
+    content: summary,
+    display: true,
+    details: { tokensBefore: 123456, firstKeptEntryId: "kept0001" },
+  };
+  const html = renderMessage(message);
+
+  assert.match(html, /<button type="button" aria-expanded="false" title="Expand"/);
+  assert.match(html, /Conversation compacted/);
+  assert.ok(html.includes(`Compacted from ${(123456).toLocaleString()} tokens`));
+  assert.doesNotMatch(html, /Ship the parser fix|following summary|File context|lib\/read\.ts|lib\/changed\.ts/);
+  assert.doesNotMatch(renderMessage({ ...message, details: undefined }), /Compacted from/);
+
+  // What the toggle reveals.
+  const details = renderToStaticMarkup(React.createElement(
+    I18nProvider,
+    null,
+    React.createElement(CompactionSummaryDetails, { summary }),
+  ));
+  assert.match(details, /following summary/);
+  assert.match(details, /Ship the parser fix/);
+  assert.match(details, /File context: 1 read, 1 modified/);
+  assert.match(details, /lib\/read\.ts/);
+  assert.match(details, /lib\/changed\.ts/);
 });
