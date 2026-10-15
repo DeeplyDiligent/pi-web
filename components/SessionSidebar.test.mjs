@@ -483,12 +483,9 @@ test("a new session moves the cwd and hands the shell the target's project", () 
   const cwd = body.indexOf("setSelectedCwd(cwd);");
   const handOff = body.indexOf("onNewSession?.(createTempSessionId(), cwd, projectKey, carryComposer ? { carryComposer: true } : undefined);");
   assert.ok(identity >= 0 && identity < cwd && cwd < handOff, "identity, then cwd, then the new session");
-  // The header "+" follows an explicit classic project filter; otherwise it keeps the cwd.
-  assert.match(callbackBody("handleNewSession"), /if \(!newSessionTarget\) return;\s*startNewSessionIn\(newSessionTarget\);/);
-  assert.match(source, /const newSessionProject = listView === "chronological" && sidebarTab === "sessions" && !archiveView/);
-  assert.match(source, /newSessionTargetForProject\(newSessionProject, selectedCwd\)/);
-  assert.match(source, /disabled=\{!newSessionTarget\}/);
-  assert.match(source, /path: newSessionTarget.cwd/);
+  // The toolbar "+" only opens the shared dialog, independent of cwd or list filter.
+  assert.match(source, /className="sidebar-new-button"\s*onClick=\{onRequestNewSession\}\s*disabled=\{!onRequestNewSession\}\s*aria-haspopup="dialog"/);
+  assert.doesNotMatch(source, /newSessionTargetForProject|const newSessionProject =/);
   assert.match(source, /onNewSession\?: \(sessionId: string, cwd: string, projectKey\?: string \| null, options\?: NewSessionOptions\) => void;/);
 });
 

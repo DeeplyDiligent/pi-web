@@ -31,6 +31,18 @@ export function getRecentProjects(sessions: readonly SessionInfo[]): RecentProje
     .map(([key, { root }]) => ({ key, root }));
 }
 
+/** The new-thread chooser puts its checked workspace first, leaving the rest in activity order. */
+export function getNewThreadProjects(sessions: readonly SessionInfo[], currentCwd: string | null): RecentProject[] {
+  const choices = getRecentProjects(sessions);
+  if (!currentCwd) return choices;
+  const currentIndex = choices.findIndex(({ root, key }) => root === currentCwd || key === currentCwd);
+  // Include a fresh workspace or active worktree even before its first thread.
+  const current = currentIndex < 0
+    ? { root: currentCwd, key: currentCwd }
+    : choices.splice(currentIndex, 1)[0];
+  return [current, ...choices];
+}
+
 export function getProjectActivity(
   sessions: readonly SessionInfo[],
   runningSessionIds: ReadonlySet<string>,

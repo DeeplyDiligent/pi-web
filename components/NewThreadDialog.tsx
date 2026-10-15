@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
-import { getRecentProjects } from "@/lib/project-groups";
+import { getNewThreadProjects } from "@/lib/project-groups";
 import type { SessionInfo } from "@/lib/types";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { ProjectPicker } from "./ProjectPicker";
@@ -26,14 +26,8 @@ export function NewThreadDialog({ sessions, currentCwd, onCancel, onSelect }: {
   const [browsing, setBrowsing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const projects = useMemo(() => {
-    const choices = getRecentProjects(sessions);
-    // Include a fresh workspace or active worktree even before its first thread.
-    if (currentCwd && !choices.some(({ root, key }) => root === currentCwd || key === currentCwd)) {
-      choices.unshift({ root: currentCwd, key: currentCwd });
-    }
-    return choices;
-  }, [sessions, currentCwd]);
+  const projects = useMemo(() => getNewThreadProjects(sessions, currentCwd), [sessions, currentCwd]);
+  const selectedKey = projects.find(({ root, key }) => root === currentCwd || key === currentCwd)?.key;
 
   useEffect(() => () => requestRef.current?.abort(), []);
   useEffect(() => {
@@ -106,7 +100,7 @@ export function NewThreadDialog({ sessions, currentCwd, onCancel, onSelect }: {
           <h2 id="new-thread-workspace-title" style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>{t("chat.chooseWorkspace")}</h2>
           <button type="button" onClick={onCancel} disabled={busy} aria-label={t("chat.close")} style={{ width: 32, height: 32, border: "none", background: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 22 }}>×</button>
         </div>
-        <ProjectPicker projects={projects} selectedKey={projects.find(({ root }) => root === currentCwd)?.key} disabled={busy} onSelect={(project) => void selectWorkspace(project.root)} />
+        <ProjectPicker projects={projects} selectedKey={selectedKey} disabled={busy} onSelect={(project) => void selectWorkspace(project.root)} />
         {error && <div role="alert" style={{ padding: "10px 16px", color: "#ef4444", fontSize: 12 }}>{error}</div>}
         <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
           <button type="button" disabled={busy} onClick={() => { setError(null); setBrowsing(true); }} style={{ padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg-hover)", color: "var(--text)", cursor: "pointer", fontSize: 12 }}>{t("sidebar.customPath")}</button>

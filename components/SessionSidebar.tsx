@@ -18,7 +18,6 @@ import {
   isGroupExpanded,
   keepOutgoingGroupOpen,
   nextProjectKeysToRecord,
-  newSessionTargetForProject,
   showLessFamilies,
   showMoreFamilies,
   type SidebarProject,
@@ -164,6 +163,8 @@ interface Props {
   onSelectSession: (session: SessionInfo, isRestore?: boolean, entryId?: string, blockIndex?: number, options?: SelectSessionOptions) => void;
   /** projectKey: the target's project identity when it is known (a group's "+", the composer's bar). */
   onNewSession?: (sessionId: string, cwd: string, projectKey?: string | null, options?: NewSessionOptions) => void;
+  /** Open the shell's shared new-thread workspace dialog from the toolbar. */
+  onRequestNewSession?: () => void;
   /** What the bar above a fresh composer moves through (`SessionSidebarControl`). */
   controlRef?: Ref<SessionSidebarControl>;
   /** The sidebar's cwd as the bar above a fresh composer shows it; reported when that changes. */
@@ -393,7 +394,7 @@ function buttonAnchor(element: HTMLElement, align: "start" | "end"): SidebarMenu
   return { kind: "rect", rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }, align };
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, controlRef, onNewSessionContextChange, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, onOpenTerminal, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onSessionsChange }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, onRequestNewSession, controlRef, onNewSessionContextChange, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, onOpenTerminal, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onBackgroundTaskDone, onRunningSessionIdsChange, onSessionsChange }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
@@ -1202,14 +1203,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // A deleted/archived project's last chat must not leave an invisible filter active.
   const activeProjectFilter = filterProjects.some((project) => project.key === sessionProjectFilter)
     ? sessionProjectFilter : null;
-  const newSessionProject = listView === "chronological" && sidebarTab === "sessions" && !archiveView
-    ? filterProjects.find((project) => project.key === activeProjectFilter) ?? null : null;
-  const newSessionTarget = useMemo(() => newSessionTargetForProject(newSessionProject, selectedCwd), [newSessionProject, selectedCwd]);
-  // Header "+": the explicit project filter wins over the currently open chat.
-  const handleNewSession = useCallback(() => {
-    if (!newSessionTarget) return;
-    startNewSessionIn(newSessionTarget);
-  }, [newSessionTarget, startNewSessionIn]);
   const mainRows = useMemo(() => listView === "chronological"
     ? filterSessionRows(model.rows, activeProjectFilter) : model.rows,
   [model.rows, listView, activeProjectFilter]);
@@ -2059,9 +2052,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         <button
           type="button"
           className="sidebar-new-button"
-          onClick={handleNewSession}
-          disabled={!newSessionTarget}
-          title={newSessionTarget ? t("sidebar.newSessionTitle", { path: newSessionTarget.cwd }) : t("sidebar.selectProject")}
+          onClick={onRequestNewSession}
+          disabled={!onRequestNewSession}
+          aria-haspopup="dialog"
+          title={t("chat.newThread")}
         >
           <PlusIcon size={12} />
           <span className="sidebar-new-label">{t("sidebar.new")}</span>

@@ -1390,6 +1390,7 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
         selectedSessionId={selectedSession?.id ?? null}
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
+        onRequestNewSession={requestNewSession}
         controlRef={sidebarControlRef}
         onNewSessionContextChange={handleSidebarNewSessionContext}
         initialSessionId={initialSessionId}

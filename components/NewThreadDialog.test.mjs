@@ -26,17 +26,20 @@ function setup(fetch) {
   return { context, selections };
 }
 
-test("the shell keeps its workspace chooser alongside the sidebar's direct New action", () => {
+test("both toolbar New buttons open the same workspace chooser without creating a thread", () => {
   assert.match(shell, /onNewSession=\{handleNewSession\}/);
   assert.match(shell, /onClick=\{requestNewSession\}/);
   assert.match(shell, /setNewThreadDialogOpen\(true\)/);
   assert.match(shell, /<NewThreadDialog[\s\S]*?onCancel=\{\(\) => setNewThreadDialogOpen\(false\)\}/);
-  assert.match(sidebar, /onClick=\{handleNewSession\}/);
+  assert.match(shell, /onRequestNewSession=\{requestNewSession\}/);
+  assert.match(sidebar, /onClick=\{onRequestNewSession\}/);
+  assert.doesNotMatch(sidebar, /disabled=\{!newSessionTarget\}/);
   assert.match(sidebar, /<ProjectWorktreePicker/);
   assert.match(source, /<ProjectPicker/);
   assert.match(picker, /filterProjects\(projects, query\)/);
   assert.match(picker, /event\.key === "Enter" && visibleProjects\.length === 1 && !disabled/);
-  assert.match(source, /choices\.unshift\(\{ root: currentCwd, key: currentCwd \}\)/);
+  assert.match(source, /getNewThreadProjects\(sessions, currentCwd\)/);
+  assert.match(source, /selectedKey=\{selectedKey\}/);
 });
 
 test("validates the selected folder before creating a thread and uses canonical identity", async () => {
