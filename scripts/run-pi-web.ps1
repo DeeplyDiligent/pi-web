@@ -1,15 +1,49 @@
 $ErrorActionPreference = 'Stop'
 
 $installDir = Join-Path $PSScriptRoot '.pi-web'
-$server = Join-Path $installDir 'node_modules/.bin/pi-web-server.cmd'
+$server = Join-Path $installDir 'node_modules\.bin\pi-web-server.cmd'
+$packageJson = Join-Path $installDir 'node_modules\@agegr\pi-web\package.json'
+$releaseCache = Join-Path $installDir 'installed-release-url.txt'
+
+$node = Get-Command node.exe -ErrorAction SilentlyContinue
+$npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
+if (-not $node -or -not $npm) {
+  throw 'Node.js and npm are required. Install Node.js 22.19 or newer, then reopen PowerShell and run this script again.'
+}
+$nodeVersion = & $node.Source --version
+if ($LASTEXITCODE -ne 0 -or [version]($nodeVersion -replace '^v', '') -lt [version]'22.19.0') {
+  throw "Node.js 22.19 or newer is required; found $nodeVersion."
+}
+
+$proxyUrl = $null
+foreach ($name in @('NPM_CONFIG_HTTPS_PROXY', 'HTTPS_PROXY', 'NPM_CONFIG_PROXY', 'HTTP_PROXY', 'ALL_PROXY')) {
+  $value = [Environment]::GetEnvironmentVariable($name, 'Process')
+  if ($value) {
+    $proxyUrl = $value
+    break
+  }
+}
+$systemProxy = [System.Net.WebRequest]::GetSystemWebProxy()
+if ($proxyUrl) {
+  $downloadProxy = New-Object System.Net.WebProxy($proxyUrl)
+}
+else {
+  $downloadProxy = $systemProxy
+  $registry = [uri]'https://registry.npmjs.org/'
+  if (-not $systemProxy.IsBypassed($registry)) {
+    $proxyUrl = $systemProxy.GetProxy($registry).AbsoluteUri
+  }
+}
 
 $url = $null
 try {
   Add-Type -AssemblyName System.Net.Http
   $handler = New-Object System.Net.Http.HttpClientHandler
-  $handler.UseProxy = $false
+  $handler.Proxy = $downloadProxy
+  $handler.DefaultProxyCredentials = [System.Net.CredentialCache]::DefaultCredentials
   $client = New-Object System.Net.Http.HttpClient($handler)
   try {
+    $client.Timeout = [TimeSpan]::FromSeconds(30)
     $client.DefaultRequestHeaders.UserAgent.ParseAdd('run-pi-web')
     $release = $client.GetStringAsync('https://api.github.com/repos/DeeplyDiligent/pi-web/releases/latest').GetAwaiter().GetResult() |
       ConvertFrom-Json
@@ -23,6 +57,26 @@ try {
     Where-Object name -like '*.tgz' |
     Select-Object -First 1 -ExpandProperty browser_download_url
   if (-not $url) { throw 'No .tgz asset found in the latest pi-web release' }
+
+  if (Test-Path $server) {
+    $installedVersion = $null
+    if (Test-Path $packageJson) {
+      try {
+        $installedVersion = (Get-Content -LiteralPath $packageJson -Raw | ConvertFrom-Json).version
+      }
+      catch {
+        Write-Warning 'Could not read the installed pi-web version; checking the cached release URL instead.'
+      }
+    }
+    $cachedUrl = if (Test-Path $releaseCache) {
+      (Get-Content -LiteralPath $releaseCache -Raw).Trim()
+    }
+    $releaseVersion = $release.tag_name -replace '^v', ''
+    if (($installedVersion -and $installedVersion -eq $releaseVersion) -or $cachedUrl -eq $url) {
+      Write-Host "Using cached pi-web install at $installDir (release $($release.tag_name))"
+      $url = $null
+    }
+  }
 }
 catch {
   if (Test-Path $server) {
@@ -34,37 +88,47 @@ catch {
   }
 }
 
-if ($url) {
-  $registry = [uri]'https://registry.npmjs.org/'
-  $systemProxy = [System.Net.WebRequest]::GetSystemWebProxy()
-  $proxy = $systemProxy.GetProxy($registry)
-
-  $proxyVars = @('HTTPS_PROXY', 'HTTP_PROXY', 'ALL_PROXY', 'NO_PROXY', 'NODE_USE_ENV_PROXY',
-    'NPM_CONFIG_PROXY', 'NPM_CONFIG_HTTPS_PROXY', 'NPM_CONFIG_NOPROXY')
-  $previous = @{}
-  foreach ($name in $proxyVars) {
-    $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+$runtimeVars = @('NODE_USE_SYSTEM_CA', 'NODE_USE_ENV_PROXY', 'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY')
+$previous = @{}
+foreach ($name in $runtimeVars) {
+  $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+}
+try {
+  if (-not $env:NODE_USE_SYSTEM_CA) {
+    $env:NODE_USE_SYSTEM_CA = '1'
   }
-
-  try {
-    $env:HTTPS_PROXY = $proxy.AbsoluteUri
-    $env:HTTP_PROXY = $proxy.AbsoluteUri
-    $env:ALL_PROXY = $proxy.AbsoluteUri
-    $env:NO_PROXY = 'github.com,githubusercontent.com'
+  if (-not $env:NODE_USE_ENV_PROXY) {
     $env:NODE_USE_ENV_PROXY = '1'
-    npm install --prefix "$installDir" --no-save --package-lock=false --no-audit --no-fund `
-      --proxy="$proxy" --https-proxy="$proxy" --noproxy="$env:NO_PROXY" `
-      -- "$url" '@earendil-works/pi-codemode@1.1.0'
-    if ($LASTEXITCODE -ne 0) { throw "npm install failed (exit code $LASTEXITCODE)" }
   }
-  finally {
-    foreach ($name in $proxyVars) {
-      [Environment]::SetEnvironmentVariable($name, $previous[$name], 'Process')
+  if ($proxyUrl) {
+    if (-not $env:HTTPS_PROXY) { $env:HTTPS_PROXY = $proxyUrl }
+    if (-not $env:HTTP_PROXY) { $env:HTTP_PROXY = $proxyUrl }
+  }
+  $env:NO_PROXY = (@($env:NO_PROXY, 'localhost', '127.0.0.1', '::1') |
+    Where-Object { $_ }) -join ','
+
+  if ($url) {
+    Write-Host "Installing pi-web release $($release.tag_name)..."
+    $proxyArgs = @()
+    if ($proxyUrl) {
+      $proxyArgs = @("--proxy=$proxyUrl", "--https-proxy=$proxyUrl")
     }
+    & $npm.Source install --prefix "$installDir" --no-save --package-lock=false --no-audit --no-fund `
+      @proxyArgs -- "$url"
+    if ($LASTEXITCODE -ne 0) {
+      throw "npm install failed (exit code $LASTEXITCODE)"
+    }
+    if (-not (Test-Path $server)) { throw "pi-web-server not found at $server" }
+    Set-Content -LiteralPath $releaseCache -Value $url -Encoding UTF8
+  }
+
+  if (-not (Test-Path $server)) { throw "pi-web-server not found at $server" }
+  & $server
+  if ($LASTEXITCODE -ne 0) { throw "pi-web-server failed (exit code $LASTEXITCODE)" }
+}
+finally {
+  foreach ($name in $runtimeVars) {
+    [Environment]::SetEnvironmentVariable($name, $previous[$name], 'Process')
   }
 }
-
-if (-not (Test-Path $server)) { throw "pi-web-server not found at $server" }
-& $server
-if ($LASTEXITCODE -ne 0) { throw "pi-web-server failed (exit code $LASTEXITCODE)" }
  
