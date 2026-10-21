@@ -18,6 +18,9 @@ the linked-worktree fixture. History and navigation tests create every browser
 profile through `createE2eContext()` in `browser-context.mjs`, which stubs only
 `/api/speech/warm`: hosted runners have no local Foundry speech model. The stub
 covers new tabs and fresh profiles without suppressing other API errors.
+These profiles block service workers so Playwright can observe navigation and
+route requests reliably, including native Ctrl/middle-click tabs. Service-worker
+offline/cache behavior is tested separately in `public/sw.test.mjs`.
 
 CI runs lint, type checking, and unit tests in one job. A separate job builds
 the application in a clean checkout and runs the same browser tests with

@@ -19,13 +19,14 @@ test("each E2E profile installs the speech warm-up stub before it is returned", 
       return context;
     },
   };
-  const options = { viewport: { width: 1280, height: 800 }, locale: "en-US" };
+  const options = { viewport: { width: 1280, height: 800 }, locale: "en-US", serviceWorkers: "allow" };
   const first = await createE2eContext(browser, options);
   const fresh = await createE2eContext(browser, options);
   assert.notEqual(first, fresh, "fresh profiles must remain isolated");
   assert.equal(profiles.length, 2);
   for (const context of profiles) {
-    assert.equal(context.options, options, "preserve caller context options");
+    assert.deepEqual(context.options, { ...options, serviceWorkers: "block" }, "keep routing and new-page events observable");
+    assert.equal(options.serviceWorkers, "allow", "do not mutate caller options");
     assert.equal(context.routes.length, 1);
     const [{ pattern, handler }] = context.routes;
     assert.equal(pattern, "**/api/speech/warm", "do not hide unrelated API errors");
