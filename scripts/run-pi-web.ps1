@@ -38,9 +38,6 @@ if ($url) {
   $registry = [uri]'https://registry.npmjs.org/'
   $systemProxy = [System.Net.WebRequest]::GetSystemWebProxy()
   $proxy = $systemProxy.GetProxy($registry)
-  if ($systemProxy.IsBypassed($registry) -or $proxy.Host -notlike '*.prismaaccess.com') {
-    throw "Expected a Prisma proxy for $registry, got $proxy"
-  }
 
   $proxyVars = @('HTTPS_PROXY', 'HTTP_PROXY', 'ALL_PROXY', 'NO_PROXY', 'NODE_USE_ENV_PROXY',
     'NPM_CONFIG_PROXY', 'NPM_CONFIG_HTTPS_PROXY', 'NPM_CONFIG_NOPROXY')
