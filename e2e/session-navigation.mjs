@@ -59,6 +59,9 @@ export async function checkSessionNavigation({ browser, base, artifacts, a, b, a
     await content[id](target).waitFor({ state: "visible" });
   };
   const newTab = async (open) => {
+    // Native modified clicks need the originating tab active after a popup
+    // was closed or reloaded. Locator actionability does not check tab focus.
+    await page.bringToFront();
     const opened = context.waitForEvent("page");
     await open();
     const tab = await opened;
@@ -97,8 +100,8 @@ export async function checkSessionNavigation({ browser, base, artifacts, a, b, a
     // Ctrl/Cmd-click and middle-click open B in another tab; this one stays on A.
     // ControlOrMeta: on macOS Ctrl-click is a secondary click (the row menu), Cmd opens tabs.
     for (const [label, open] of [
-      ["Ctrl/Cmd+click", () => link(page, b.id).click({ modifiers: ["ControlOrMeta"] })],
-      ["middle-click", () => link(page, b.id).click({ button: "middle" })],
+      ["Ctrl/Cmd+click", () => link(page, b.id).click({ modifiers: ["ControlOrMeta"], delay: 50 })],
+      ["middle-click", () => link(page, b.id).click({ button: "middle", delay: 50 })],
     ]) {
       const tab = await newTab(open);
       assert.equal(new URL(tab.url()).searchParams.get("session"), b.id, label);
@@ -152,7 +155,7 @@ export async function checkSessionNavigation({ browser, base, artifacts, a, b, a
     await link(page, b.id, "pinned").waitFor();
     assert.equal(await link(page, b.id, "pinned").getAttribute("href"), `?session=${b.id}`);
     await expectShows(page, a.id);
-    tab = await newTab(() => link(page, b.id, "pinned").click({ modifiers: ["ControlOrMeta"] }));
+    tab = await newTab(() => link(page, b.id, "pinned").click({ modifiers: ["ControlOrMeta"], delay: 50 }));
     await expectShows(tab, b.id);
     await tab.close();
     await row(page, b.id, "pinned").click({ button: "right" });
@@ -166,7 +169,7 @@ export async function checkSessionNavigation({ browser, base, artifacts, a, b, a
     await panel(page).locator('[data-row-key="footer-archived"] button').click();
     await link(page, b.id, "archive").waitFor();
     assert.equal(await link(page, b.id, "archive").getAttribute("href"), `?session=${b.id}`);
-    tab = await newTab(() => link(page, b.id, "archive").click({ modifiers: ["ControlOrMeta"] }));
+    tab = await newTab(() => link(page, b.id, "archive").click({ modifiers: ["ControlOrMeta"], delay: 50 }));
     await expectShows(tab, b.id, { archived: true });
     await tab.close();
     await row(page, b.id, "archive").hover();
