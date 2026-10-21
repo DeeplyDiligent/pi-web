@@ -4,11 +4,12 @@
 // so the tabs share localStorage (workspace memory) as real tabs do.
 import assert from "node:assert/strict";
 import { join } from "node:path";
+import { createE2eContext } from "./browser-context.mjs";
 
 const FORBIDDEN_COMMANDS = new Set(["prompt", "steer", "follow_up", "fork", "fork_branch", "clone", "new_session"]);
 
 export async function checkSessionNavigation({ browser, base, artifacts, a, b, api, deleteSession }) {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: "en-US" });
+  const context = await createE2eContext(browser, { viewport: { width: 1280, height: 800 }, locale: "en-US" });
   await context.tracing.start({ screenshots: true, snapshots: true });
   const errors = [];
   const watch = (target) => {
@@ -185,7 +186,7 @@ export async function checkSessionNavigation({ browser, base, artifacts, a, b, a
     // the same): a profile that already opened a session of that project falls
     // back to it through the workspace memory (AppShell's
     // restoreWorkspaceContext), so that case is not asserted here.
-    const freshContext = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: "en-US" });
+    const freshContext = await createE2eContext(browser, { viewport: { width: 1280, height: 800 }, locale: "en-US" });
     try {
       const missing = await freshContext.newPage();
       // Uncaught errors only: the 404 for the missing session is logged as a console error by design.

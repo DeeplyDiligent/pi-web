@@ -6,6 +6,7 @@ import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { showSidebarFiles, showSidebarSessions } from "./sidebar.mjs";
 import { filePanelFixture } from "./file-panel.mjs";
+import { createE2eContext } from "./browser-context.mjs";
 
 /** Seed before the server starts: a real linked worktree and an empty project. */
 export function createProjectNavigationFixtures({ agentDir, sessionDir, timestamp }) {
@@ -47,7 +48,7 @@ export async function checkProjectNavigation({ browser, base, artifacts, fixture
   await post("/api/sessions/ui-state", { ...pin, pinned: true });
   try {
     for (const mobile of [false, true]) {
-      const context = await browser.newContext({
+      const context = await createE2eContext(browser, {
         viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 },
         locale: "en-US", hasTouch: mobile, isMobile: mobile,
       });

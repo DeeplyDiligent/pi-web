@@ -14,7 +14,10 @@ loopback port. Run it in a checkout without an active dev server; Next.js
 shares `.next/dev/lock` within a checkout. All fixtures are created before
 startup in a temporary `PI_CODING_AGENT_DIR` and removed on completion.
 No model credentials or existing Pi sessions are needed. Git is required for
-the linked-worktree fixture.
+the linked-worktree fixture. History and navigation tests create every browser
+profile through `createE2eContext()` in `browser-context.mjs`, which stubs only
+`/api/speech/warm`: hosted runners have no local Foundry speech model. The stub
+covers new tabs and fresh profiles without suppressing other API errors.
 
 CI runs lint, type checking, and unit tests in one job. A separate job builds
 the application in a clean checkout and runs the same browser tests with

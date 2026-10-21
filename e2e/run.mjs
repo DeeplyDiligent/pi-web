@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { createE2eContext } from "./browser-context.mjs";
 import { checkFilePanel, filePanelFixture } from "./file-panel.mjs";
 import { checkExtensionDialogSizing, checkExtensionDialogs, extensionSource } from "./extension-dialog.mjs";
 import { checkChatAppearance } from "./chat-appearance.mjs";
@@ -243,7 +244,7 @@ try {
 
   browser = await chromium.launch();
   for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
-    context = await browser.newContext({ viewport, locale: "en-US" });
+    context = await createE2eContext(browser, { viewport, locale: "en-US" });
     // This scenario tests lazy loading by opening initially collapsed thinking.
     // Do not depend on the fork's expanded default or a user's preferences.
     await context.addInitScript((origin) => {
@@ -251,9 +252,6 @@ try {
         localStorage.setItem("pi-thinking-expanded", "false");
       }
     }, base);
-    // Foundry speech requires local hardware/models that hosted CI does not have.
-    // This suite exercises chat/history, not speech transcription.
-    await context.route("**/api/speech/warm", (route) => route.fulfill({ status: 204 }));
     await context.tracing.start({ screenshots: true, snapshots: true });
     page = await context.newPage();
     page.setDefaultTimeout(30_000);
