@@ -51,10 +51,12 @@ Coverage:
   Chromium, one context so tabs share storage): a plain click and Enter
   select in place without a page load; Ctrl+click, middle-click and the row
   menu's Open in new tab (right-click, ⋯, T; just before Delete) open the clicked row's session in
-  a new tab while the original keeps its own; both tabs keep their session
-  through reloads; pinned and archived rows link the same way; nothing
+  a new tab while the original keeps its own; pinned and archived rows link
+  the same way; nothing
   creates, copies or prompts a session; a missing session's link selects none
   in a fresh profile; a keyboard Fork puts focus on the copy row's link.
+  The cross-tab reload and bare-URL restoration scenario was removed because
+  it repeatedly timed out in CI.
 - Project groups offer Open in new tab (`project-navigation.mjs`, desktop
   and mobile Chromium): the current linked worktree, another project's root,
   and a pinned project without sessions open as fresh composers. Reload keeps

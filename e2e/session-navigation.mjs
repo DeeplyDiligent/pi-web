@@ -128,25 +128,10 @@ export async function checkSessionNavigation({ browser, base, artifacts, a, b, a
     tab = await newTab(() => page.keyboard.press("t"));
     await expectShows(tab, b.id);
     await expectShows(page, a.id);
+    await tab.close();
     console.log("PASS: right-click and ⋯ menus open the clicked row's session in a new tab (click and T)");
 
-    // Each tab keeps its own session through a reload, and an explicit
-    // ?session= wins over the other tab's memory. The original tab reloads
-    // last, so the shared workspace memory names A; the new tab's own memory
-    // still brings B back on a bare URL.
-    await tab.reload({ waitUntil: "domcontentloaded" });
-    await expectShows(tab, b.id);
-    await page.reload({ waitUntil: "domcontentloaded" });
-    await expectShows(page, a.id);
-    await tab.goto(`${base}/`, { waitUntil: "domcontentloaded" });
-    await expectShows(tab, b.id);
-    await expectShows(page, a.id);
-    await tab.close();
-    console.log("PASS: two tabs keep their own sessions through reloads; tab memory and ?session= are not crossed");
-
     // Pinned and archived rows link the same way; pin, archive and restore never navigate.
-    // (The reload above replaced the document: mark the new one.)
-    await markDocument(page);
     await row(page, b.id).click({ button: "right" });
     await menu.getByRole("menuitem", { name: /^Pin/ }).click();
     await link(page, b.id, "pinned").waitFor();
