@@ -119,6 +119,7 @@ export interface ChatInputHandle {
   rekeyDraft: (previousKey: string, nextKey: string) => void;
   restoreSubmission: (text: string, images?: ChatDraftImage[], targetDraftKey?: string) => void;
   startSpeechRecording: () => void;
+  focus: () => void;
 }
 
 // "configured" sends no override, so the session follows settings.json defaultTools.
@@ -366,6 +367,18 @@ export function isRunEndStrayClick(detail: number, msSinceRunEnd: number): boole
 
 export function canClearBuiltinCommandInput(message: string, imageCount: number, submittedMessage: string): boolean {
   return imageCount === 0 && message.trim() === submittedMessage;
+}
+
+/**
+ * Whether the composer box stacks its draft above its buttons instead of sitting
+ * them side by side. A phone has no room for the steer and follow-up buttons next
+ * to the draft: in one row the two of them take more than half the width and the
+ * placeholder is cut to "立即引导 / 排队后...". So while a run streams they move to
+ * their own right-aligned row below the draft. Quote mode (`compact`) stacks for
+ * its own reason: it is a short excerpt, not a full composer.
+ */
+export function stacksComposerLayout(compact: boolean, isMobile: boolean, isStreaming: boolean): boolean {
+  return compact || (isMobile && isStreaming);
 }
 
 const SLASH_SOURCES: SlashCommandSource[] = ["builtin", "extension", "prompt", "skill"];
@@ -922,6 +935,13 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         ta.style.height = "auto";
         ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
       });
+    },
+    // The caret goes after a draft that came back, so typing continues it.
+    focus() {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
     },
     insertText(text: string) {
       const ta = textareaRef.current;
@@ -2953,6 +2973,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 options={modelOptions}
                 value={model}
                 onChange={onModelChange}
+                onReselect={onModelChange}
                 disabled={isStreaming || speechStatus !== "idle"}
                 busy={modelSwitching}
                 isAutoSelection={isAutoModelSelection}
