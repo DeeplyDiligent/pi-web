@@ -260,13 +260,13 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
 
       <section className="settings-general-section">
         <h3 className="settings-general-heading">{t("settings.sessionList")}</h3>
-        <p className="settings-general-description">{t("settings.sessionListDescription")}</p>
-        <div role="radiogroup" aria-label={t("settings.sessionList")} className="settings-theme-options">
+        <p id="settings-session-list-description" className="settings-general-description">{t("settings.sessionListDescription")}</p>
+        <div role="radiogroup" aria-label={t("settings.sessionList")} aria-describedby="settings-session-list-description" className="settings-send-mode-options">
           {(["projects", "chronological"] as const).map((view) => (
-            <label key={view} className="settings-theme-option">
+            <label key={view} className="settings-send-mode-option">
               <input type="radio" name="session-list-view" value={view} checked={sessionListView === view}
                 onChange={() => setSessionListView(view)} className="sr-only" />
-              <span className="settings-theme-option-label">{t(view === "projects" ? "settings.sessionsByProject" : "settings.sessionsByTime")}</span>
+              <span className="settings-send-mode-label">{t(view === "projects" ? "settings.sessionsByProject" : "settings.sessionsByTime")}</span>
             </label>
           ))}
         </div>
