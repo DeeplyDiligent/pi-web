@@ -1,7 +1,8 @@
 name: Demo
 
 # Builds the static Pi Web demo in demo/ and publishes it to GitHub Pages.
-# Pull requests that touch the demo only build it.
+# Pull requests that touch the demo only build it. Forks also only build unless
+# the DEPLOY_DEMO_PAGES repository variable is true and Pages is configured.
 
 on:
   push:
@@ -34,7 +35,7 @@ jobs:
           cache: npm
           cache-dependency-path: demo/package-lock.json
       - id: pages
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && (github.repository == 'agegr/pi-web' || vars.DEPLOY_DEMO_PAGES == 'true')
         uses: actions/configure-pages@v5
       - run: npm ci
       - run: npm run lint
@@ -42,13 +43,13 @@ jobs:
         env:
           # "/<repo>" for a project site, empty for a custom domain.
           PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
-      - if: github.event_name != 'pull_request'
+      - if: github.event_name != 'pull_request' && (github.repository == 'agegr/pi-web' || vars.DEPLOY_DEMO_PAGES == 'true')
         uses: actions/upload-pages-artifact@v3
         with:
           path: demo/out
 
   deploy:
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && (github.repository == 'agegr/pi-web' || vars.DEPLOY_DEMO_PAGES == 'true')
     needs: build
     runs-on: ubuntu-latest
     permissions:

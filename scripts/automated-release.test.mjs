@@ -19,6 +19,20 @@ test("GitHub-only release workflow gates packaging on CI and needs no npm publis
   assert.doesNotMatch(text, /npm publish|NPM_TOKEN|NODE_AUTH_TOKEN|id-token/);
 });
 
+test("demo builds on main without enabling Pages on forks", () => {
+  const workflow = load(readFileSync(new URL("../.github/workflows/demo-pages.yml", import.meta.url), "utf8"));
+  assert.deepEqual(workflow.on.push.branches, ["main"]);
+  assert.equal(workflow.jobs.build.if, undefined, "forks still build and lint the demo");
+  const gate = "github.event_name != 'pull_request' && (github.repository == 'agegr/pi-web' || vars.DEPLOY_DEMO_PAGES == 'true')";
+  for (const action of ["actions/configure-pages@v5", "actions/upload-pages-artifact@v3"]) {
+    assert.equal(workflow.jobs.build.steps.find((step) => step.uses === action)?.if, gate);
+  }
+  assert.equal(workflow.jobs.deploy.if, gate);
+  for (const command of ["npm ci", "npm run lint", "npm run build"]) {
+    assert.equal(workflow.jobs.build.steps.find((step) => step.run === command)?.if, undefined);
+  }
+});
+
 test("portable package command launches without requiring Cloudflare", () => {
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(pkg.bin["pi-web-server"], "bin/pi-web.js");
