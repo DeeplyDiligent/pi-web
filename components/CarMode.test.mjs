@@ -145,6 +145,9 @@ test("car view keeps extension dialogs and the same voice handoff", () => {
   assert.match(chat, /<ExtensionCustomPanel/);
   assert.match(chat, /carMode=\{carMode\}/);
   assert.match(chat, /autoReadEnabledRef\.current\) chatInputRef\?\.current\?\.startSpeechRecording\(\)/);
-  assert.match(chat, /<MarkdownBody>\{getAssistantSpeechText\(answer\)\}<\/MarkdownBody>/);
+  assert.match(chat, /<CarConversation[\s\S]*?messages=\{messages\}[\s\S]*?loadingHistory=\{carHistory.loading\}/);
+  assert.match(chat, /useAllCarHistory\(/);
+  assert.match(chat, /useCarScrollReturn\(carMode, scrollContainerRef/);
+  assert.match(chat, /inert=\{carMode\}/);
   assert.match(chat, /useSpeechFollow\(speechProgress, carMode \? carConversationRef : scrollContainerRef, messages\)/);
 });

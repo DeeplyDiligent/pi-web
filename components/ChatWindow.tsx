@@ -18,6 +18,7 @@ import { skillExpansionToCommand } from "@/lib/slash-display";
 import { dropMentionText, splitDroppedItems, uploadFiles, type DroppedItem } from "@/lib/file-upload-client";
 import { MarkdownBody } from "./MarkdownBody";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
+import { CarConversation } from "./CarConversation";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { AnsiText } from "./AnsiText";
@@ -39,6 +40,8 @@ import { findChatScrollAnchor, type ChatScrollPosition } from "@/lib/chat-scroll
 import { getAssistantSpeechText } from "@/lib/speech-text";
 import type { SpeechProgressStore } from "@/lib/speech-follow";
 import { useSpeechFollow } from "@/hooks/useSpeechFollow";
+import { useAllCarHistory } from "@/hooks/useAllCarHistory";
+import { useCarScrollReturn } from "@/hooks/useCarScrollReturn";
 import {
   captureScrollDistance,
   getNextVisibleCount,
@@ -338,9 +341,6 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   const isStreaming = useStreamingSelector(streamingStore, selectIsStreaming);
   const sessionBusy = agentRunning || bashRunning || editingMessage;
   const carConversationRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (carMode && !speechProgress?.getSnapshot() && carConversationRef.current) carConversationRef.current.scrollTop = carConversationRef.current.scrollHeight;
-  }, [carMode, messages, speechProgress]);
   useSpeechFollow(speechProgress, carMode ? carConversationRef : scrollContainerRef, messages);
   const handledAutoReadRequestRef = useRef(0);
   const lastAutoReadKeyRef = useRef<string | null>(null);
@@ -609,6 +609,20 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     if (!context && requestedCursorRef.current === before) requestedCursorRef.current = null;
     return context;
   }, [activeLeafId, loadContext]);
+  const loadCarHistoryPage = useCallback((before: string, signal: AbortSignal) => {
+    const sid = session?.id ?? sessionIdRef.current;
+    if (!sid) return Promise.resolve(undefined);
+    return loadOlderPage(sid, before, { tail: 500, signal });
+  }, [loadOlderPage, session?.id, sessionIdRef]);
+  const carHistory = useAllCarHistory({
+    enabled: carMode && !loading,
+    sessionId: session?.id ?? sessionIdRef.current,
+    leafId: activeLeafId,
+    cursor: historyCursor,
+    hasMore: hasEarlierMessages,
+    busyRef: loadingOlderRef,
+    loadPage: loadCarHistoryPage,
+  });
   useEffect(() => {
     // A reloaded history can come back to a cursor asked for before.
     if (historyCursor !== requestedCursorRef.current) requestedCursorRef.current = null;
@@ -763,7 +777,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   // When it becomes visible, load the next page of older messages.
   useEffect(() => {
     const container = scrollContainerRef.current;
-    if (!sentinel || !container) return;
+    if (carMode || !sentinel || !container) return;
     const observer = new IntersectionObserver(
       (entries) => {
         if (!entries[0]?.isIntersecting) return;
@@ -795,7 +809,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [sentinel, visibleCount, historyCursor, hasEarlierMessages, session, loadOlderPage, sessionIdRef, scrollContainerRef]);
+  }, [carMode, sentinel, visibleCount, historyCursor, hasEarlierMessages, session, loadOlderPage, sessionIdRef, scrollContainerRef]);
 
   // Keep the rendered window at least as large as what's loaded, so prepended
   // (older) pages stay visible instead of being sliced off the top.
@@ -933,6 +947,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   }, [messages.length]);
 
   const isEmptyNew = isNew && messages.length === 0 && !isStreaming && !sessionBusy;
+  useCarScrollReturn(carMode, scrollContainerRef, session?.id ?? newSessionDraftKey ?? "new", messages);
   useScrollbarVisibility(scrollContainerRef, Boolean(session?.id) || !isEmptyNew);
   const messageCwd = session?.cwd ?? newSessionCwd ?? undefined;
   const promptAnchorSpacerRef = useRef<HTMLDivElement | null>(null);
@@ -1182,29 +1197,35 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         {extensionCustomUi && (
           <ExtensionCustomPanel key={extensionCustomUi.id} request={extensionCustomUi} waitingCount={waitingExtensionCustomUiCount} onInput={sendExtensionCustomInput} />
         )}
-        {carMode && <div ref={carConversationRef} className="car-conversation">
-          {(() => {
-            const lastUserIndex = messages.findLastIndex((message) => message.role === "user");
-            const user = messages[lastUserIndex];
-            const answerIndex = messages.findLastIndex((message, index) => index > lastUserIndex && message.role === "assistant" && getAssistantSpeechText(message).trim());
-            const answer = messages[answerIndex];
-            const userText = user?.role === "user" ? (typeof user.content === "string" ? user.content : user.content.filter((block) => block.type === "text").map((block) => block.text).join("\n")) : "";
-            return <>
-              {userText && <div className="car-user-message"><span>You</span><p>{userText}</p></div>}
-              {answer?.role === "assistant" && <div className="car-answer" data-speech-response-key={`${session?.id ?? sessionIdRef.current ?? "new"}:${messageKeys[answerIndex] ?? answer.timestamp ?? answerIndex}`}><span>Pi</span><MarkdownBody>{getAssistantSpeechText(answer)}</MarkdownBody></div>}
-              {sessionBusy && <p role="status">{phaseLabel(agentPhase, t, isCompacting) || "Waiting for response…"}</p>}
-            </>;
-          })()}
-        </div>}
-        {!carMode && !isEmptyNew && <>
+        {carMode && <CarConversation
+          messages={messages}
+          messageKeys={messageKeys}
+          sessionKey={session?.id ?? sessionIdRef.current ?? "new"}
+          containerRef={carConversationRef}
+          speechProgress={speechProgress}
+          loadingHistory={carHistory.loading}
+          historyError={carHistory.error}
+          busyLabel={sessionBusy ? phaseLabel(agentPhase, t, isCompacting) || "Waiting for response…" : undefined}
+          cwd={messageCwd}
+          onOpenFile={onOpenFile}
+        />}
+        {!isEmptyNew && <>
         <div
           ref={scrollContainerRef}
+          inert={carMode}
+          aria-hidden={carMode || undefined}
           // The message list is the one place long output has to be dragged through,
           // so it shows its scrollbar instead of hiding it behind the minimap (#788).
           // A stable gutter keeps the centred column from shifting when a short
           // session grows past one screen.
           className="scrollbar-subtle min-w-0 flex-1 overflow-x-hidden overflow-y-auto pt-4 [scrollbar-gutter:stable]"
-          style={{ visibility: pendingScrollRestore ? "hidden" : undefined }}
+          style={{
+            visibility: carMode || pendingScrollRestore ? "hidden" : undefined,
+            opacity: carMode ? 0 : undefined,
+            position: carMode ? "absolute" : undefined,
+            inset: carMode ? 0 : undefined,
+            pointerEvents: carMode ? "none" : undefined,
+          }}
         >
           <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING}px` }}>
             <div ref={messageContentRef} onPointerUp={captureQuotedSelection} style={{ width: "100%", minWidth: 0, maxWidth: "var(--chat-content-max-width, 820px)", margin: "0 auto" }}>
@@ -1296,7 +1317,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 // One shape with or without notices, so lines arriving on a reload do not remount the view.
                 if (!isVisible || currentRefIdx === undefined) return <Fragment key={`${keyPrefix}-${messageKey}`}>{view}{noticeLines}</Fragment>;
                 return (
-                  <div key={`${keyPrefix}-${messageKey}`} data-entry-id={entryIds[idx]} data-speech-response-key={canSpeakResponse ? responseSpeechKey : undefined} ref={options.attachRef === false ? undefined : attachVisibleRef(idx, currentRefIdx)}>
+                  <div key={`${keyPrefix}-${messageKey}`} data-entry-id={entryIds[idx]} data-message-key={`${keyPrefix}-${messageKey}`} data-speech-response-key={canSpeakResponse ? responseSpeechKey : undefined} ref={options.attachRef === false ? undefined : attachVisibleRef(idx, currentRefIdx)}>
                     {view}
                     {noticeLines}
                   </div>
@@ -1484,7 +1505,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
             </div>
           </div>
         </div>
-        {isMobile || pendingScrollRestore ? null : (
+        {carMode || isMobile || pendingScrollRestore ? null : (
           <ChatMinimap
             messages={messages}
             getStreamingMessage={getStreamingMessage}
@@ -1577,7 +1598,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       )}
 
       <div className="relative shrink-0">
-        {!isEmptyNew && (
+        {!carMode && !isEmptyNew && (
           <div
             style={{
               position: "absolute",

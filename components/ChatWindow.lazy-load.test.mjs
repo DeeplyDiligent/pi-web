@@ -23,11 +23,11 @@ const forgetCursor = compile(hook("useEffect", "requestedCursorRef.current = nul
 
 // Mounts the observer effect with the given history state; `reachTop()` is the
 // sentinel coming into view, `render(cursor)` the next cursor rendering.
-function mount({ hasEarlierMessages, landed = true }) {
+function mount({ hasEarlierMessages, landed = true, carMode = false }) {
   const calls = { visibleCount: 50, loads: [] };
   let observed = null;
   const context = createContext({
-    sentinel: {}, scrollContainerRef: { current: { scrollHeight: 4000, scrollTop: 0 } },
+    carMode, sentinel: {}, scrollContainerRef: { current: { scrollHeight: 4000, scrollTop: 0 } },
     loadingOlderRef: { current: false }, prevScrollDistanceRef: { current: null }, requestedCursorRef: { current: null },
     hasEarlierMessages, historyCursor: "older", session: { id: "a" }, sessionIdRef: { current: "a" }, activeLeafId: "leaf",
     captureScrollDistance, getNextVisibleCount,
@@ -41,6 +41,7 @@ function mount({ hasEarlierMessages, landed = true }) {
   return {
     calls,
     context,
+    observing: () => Boolean(observed),
     reachTop: async () => {
       observed([{ isIntersecting: true }]);
       await new Promise((resolve) => setImmediate(resolve));
@@ -60,6 +61,12 @@ async function reachTop(state) {
 }
 
 const cursors = (calls) => calls.loads.map((args) => args[2]);
+
+test("normal pagination is paused while its transcript is hidden in car mode", () => {
+  const chat = mount({ hasEarlierMessages: true, carMode: true });
+  assert.equal(chat.observing(), false);
+  assert.deepEqual(chat.calls.loads, []);
+});
 
 test("with every message loaded, reaching the top widens the window over rows still hidden", async () => {
   assert.deepEqual(await reachTop({ hasEarlierMessages: false }), { visibleCount: 100, loads: [], scrollDistance: 4000 });
