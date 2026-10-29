@@ -19,6 +19,49 @@ const { ModelSelector } = await jiti.import("./ModelSelector.tsx");
 const { clearDraft, getDraft, mergeRestoredSubmissionDraft, mergeRestoredSubmissionText, rekeyDraft, setDraft } = await jiti.import("@/lib/draft-store");
 const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 
+test("car dictation follows the bottom on transcript updates and resize", () => {
+  const source = ts.createSourceFile("ChatInput.tsx", readFileSync(new URL("./ChatInput.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  function findEffect(node) {
+    if (ts.isCallExpression(node) && node.expression.getText(source) === "useLayoutEffect" && node.arguments[0]?.getText(source).includes("const transcript = carTranscriptRef.current")) return node.arguments[0];
+    return ts.forEachChild(node, findEffect);
+  }
+  const callback = ts.transpileModule(findEffect(source).getText(source), { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText.trim().replace(/;$/, "");
+  const script = new Script(`(${callback})()`);
+  const transcript = { scrollTop: 0, scrollHeight: 500 };
+  let resize;
+  let disconnected = false;
+  const cleanup = script.runInNewContext({ carMode: true, carTranscriptRef: { current: transcript }, ResizeObserver: class {
+    constructor(callback) { resize = callback; }
+    observe(element) { assert.equal(element, transcript); }
+    disconnect() { disconnected = true; }
+  } });
+  assert.equal(transcript.scrollTop, 500);
+  transcript.scrollHeight = 900;
+  resize();
+  assert.equal(transcript.scrollTop, 900);
+  cleanup();
+  assert.equal(disconnected, true);
+  transcript.scrollTop = 0;
+  script.runInNewContext({ carMode: false, carTranscriptRef: { current: transcript } });
+  assert.equal(transcript.scrollTop, 0);
+});
+
+test("car mode renders a large voice control without the normal composer", () => {
+  const render = (props) => renderToStaticMarkup(React.createElement(I18nProvider, null,
+    React.createElement(ChatInput, { carMode: true, isStreaming: false, onSend() {}, onAbort() {}, ...props })));
+  const idle = render({});
+  assert.match(idle, /car-voice-primary/);
+  assert.match(idle, /Tap the microphone to speak/);
+  assert.doesNotMatch(idle, /<textarea|model-selector/);
+  const speaking = render({ speaking: true });
+  assert.match(speaking, /Reading response aloud/);
+  assert.match(speaking, /Stop reading/);
+  const running = render({ isStreaming: true });
+  assert.match(running, /Waiting for response/);
+  assert.match(running, /car-voice-primary[^>]*disabled/);
+  assert.match(running, /Stop response/);
+});
+
 test("preserves pasted HTML links as Markdown without changing plain text layout", () => {
   const link = (label, href, occurrence = 0) => ({ label, href, occurrence });
 

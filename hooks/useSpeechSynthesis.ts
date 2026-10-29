@@ -3,29 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { prepareSpeechText } from "@/lib/speech-text";
 import { useScreenWakeLock } from "@/hooks/useScreenWakeLock";
+import { createSpeechProgressStore, splitSpeechText } from "@/lib/speech-follow";
 
 const AUTO_READ_STORAGE_KEY = "pi-auto-read-responses";
-const MAX_UTTERANCE_CHARS = 1800;
-
-function splitForSpeech(text: string): string[] {
-  const chunks: string[] = [];
-  let remaining = text.trim();
-  while (remaining.length > MAX_UTTERANCE_CHARS) {
-    const window = remaining.slice(0, MAX_UTTERANCE_CHARS + 1);
-    const sentenceBreak = Math.max(window.lastIndexOf(". "), window.lastIndexOf("! "), window.lastIndexOf("? "), window.lastIndexOf("\n"));
-    const wordBreak = window.lastIndexOf(" ");
-    const splitAt = sentenceBreak > MAX_UTTERANCE_CHARS / 2 ? sentenceBreak + 1 : wordBreak > 0 ? wordBreak : MAX_UTTERANCE_CHARS;
-    chunks.push(remaining.slice(0, splitAt).trim());
-    remaining = remaining.slice(splitAt).trim();
-  }
-  if (remaining) chunks.push(remaining);
-  return chunks;
-}
 
 export function useSpeechSynthesis(locale: string) {
   const [autoReadEnabled, setAutoReadEnabled] = useState(false);
   const [supported, setSupported] = useState(false);
   const [speakingKey, setSpeakingKey] = useState<string | null>(null);
+  const [speechProgress] = useState(createSpeechProgressStore);
   const generationRef = useRef(0);
   useScreenWakeLock(speakingKey !== null);
 
@@ -39,14 +25,16 @@ export function useSpeechSynthesis(locale: string) {
     return () => {
       generationRef.current += 1;
       window.speechSynthesis?.cancel();
+      speechProgress.set(null);
     };
-  }, []);
+  }, [speechProgress]);
 
   const stopSpeaking = useCallback(() => {
     generationRef.current += 1;
     window.speechSynthesis?.cancel();
     setSpeakingKey(null);
-  }, []);
+    speechProgress.set(null);
+  }, [speechProgress]);
 
   const speakResponse = useCallback((markdown: string, key: string, onComplete?: () => void) => {
     if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) return;
@@ -55,7 +43,8 @@ export function useSpeechSynthesis(locale: string) {
       return;
     }
 
-    const chunks = splitForSpeech(prepareSpeechText(markdown));
+    const text = prepareSpeechText(markdown);
+    const chunks = splitSpeechText(text);
     if (chunks.length === 0) return;
     const generation = ++generationRef.current;
     window.speechSynthesis.cancel();
@@ -65,28 +54,41 @@ export function useSpeechSynthesis(locale: string) {
       if (generationRef.current !== generation) return;
       if (index >= chunks.length) {
         setSpeakingKey(null);
+        speechProgress.set(null);
         onComplete?.();
         return;
       }
-      const utterance = new SpeechSynthesisUtterance(chunks[index]);
+      const chunk = chunks[index];
+      const utterance = new SpeechSynthesisUtterance(chunk.text);
       utterance.lang = locale;
+      const reportProgress = (offset: number) => {
+        if (generationRef.current === generation) speechProgress.set({ key, text, charIndex: chunk.start + offset });
+      };
+      reportProgress(0);
+      utterance.onboundary = (event) => reportProgress(event.charIndex);
       utterance.onend = () => speakChunk(index + 1);
       utterance.onerror = () => {
-        if (generationRef.current === generation) setSpeakingKey(null);
+        if (generationRef.current === generation) {
+          generationRef.current += 1;
+          setSpeakingKey(null);
+          speechProgress.set(null);
+        }
       };
       window.speechSynthesis.speak(utterance);
     };
     speakChunk(0);
-  }, [locale, speakingKey, stopSpeaking]);
+  }, [locale, speakingKey, speechProgress, stopSpeaking]);
 
-  const setAutoRead = useCallback((enabled: boolean) => {
+  const setAutoRead = useCallback((enabled: boolean, options?: { temporary?: boolean }) => {
     setAutoReadEnabled(enabled);
     try {
-      localStorage.setItem(AUTO_READ_STORAGE_KEY, String(enabled));
+      // Car mode is temporary. Persist "off" immediately, not in an unload
+      // handler, since phones can kill a background page without running one.
+      localStorage.setItem(AUTO_READ_STORAGE_KEY, String(enabled && !options?.temporary));
     } catch {
       // Keep the current page usable when storage is unavailable.
     }
   }, []);
 
-  return { autoReadEnabled, setAutoReadEnabled: setAutoRead, speechSynthesisSupported: supported, speakResponse, speakingKey, stopSpeaking };
+  return { autoReadEnabled, setAutoReadEnabled: setAutoRead, speechSynthesisSupported: supported, speakResponse, speakingKey, speechProgress, stopSpeaking };
 }

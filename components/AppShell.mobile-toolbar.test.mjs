@@ -16,7 +16,7 @@ test("uses a compact narrow-mobile toolbar with a floating action layer", () => 
   assert.match(source, /data-mobile-toolbar="true"[\s\S]*?flex: 1,[\s\S]*?minWidth: 0/);
   assert.match(
     source,
-    /data-mobile-toolbar-actions="true"[\s\S]*?position: "absolute"[\s\S]*?right: 0,[\s\S]*?left: TOP_BAR_ICON_BUTTON_SIZE/,
+    /data-mobile-toolbar-actions="true"[\s\S]*?position: "absolute"[\s\S]*?right: TOP_BAR_ICON_BUTTON_SIZE \* 2,[\s\S]*?left: TOP_BAR_ICON_BUTTON_SIZE/,
   );
 
   for (const action of ["history", "name", "agents", "branches", "system", "tools"]) {
@@ -53,10 +53,12 @@ test("keeps covered statistics and file controls out of interaction and focus", 
   assert.match(source, /aria-hidden=\{covered \? true : undefined\}/);
 });
 
-test("places New thread between Split and Refresh on mobile and desktop", () => {
-  for (const mobile of ["true", "false"]) {
-    assert.match(source, new RegExp(`renderMainFileToggle\\(${mobile}\\)\\}\\s*\\{renderNewThreadButton\\(${mobile}\\)\\}\\s*\\{renderRefreshButton\\(${mobile}\\)`));
-  }
+test("keeps Refresh last, with the mobile car control directly to its left", () => {
+  assert.match(source, /renderMainFileToggle\(true\)\}\s*\{renderNewThreadButton\(true\)\}/);
+  assert.match(source, /\{renderCarModeButton\(\)\}\s*\{renderRefreshButton\(true\)\}/);
+  assert.match(source, /renderMainFileToggle\(false\)\}\s*\{renderNewThreadButton\(false\)\}\s*\{renderRefreshButton\(false\)\}/);
+  const refresh = source.slice(source.indexOf("const renderRefreshButton"), source.indexOf("const renderNewThreadButton"));
+  assert.doesNotMatch(refresh, /covered|disabled=|visibility:/);
 });
 
 test("New thread opens the workspace chooser even without an active project", () => {

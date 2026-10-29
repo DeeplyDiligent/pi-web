@@ -130,7 +130,24 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
   // also fire for tasks finishing in a non-active workspace whose ChatWindow
   // is not mounted. ChatWindow receives the audio callbacks as props.
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio, holdAudio, soundEnabledRef } = useAudio();
-  const { autoReadEnabled, setAutoReadEnabled, speechSynthesisSupported, speakResponse, speakingKey: speakingResponseKey } = useSpeechSynthesis(locale);
+  const { autoReadEnabled, setAutoReadEnabled, speechSynthesisSupported, speakResponse, speakingKey: speakingResponseKey, speechProgress, stopSpeaking } = useSpeechSynthesis(locale);
+  const [carMode, setCarMode] = useState(false);
+  useEffect(() => {
+    if (!carMode) return;
+    const leaveCarMode = () => {
+      stopSpeaking();
+      setAutoReadEnabled(false);
+      setCarMode(false);
+    };
+    const onVisibilityChange = () => { if (document.hidden) leaveCarMode(); };
+    if (!isMobile || document.hidden) { leaveCarMode(); return; }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("pagehide", leaveCarMode);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("pagehide", leaveCarMode);
+    };
+  }, [carMode, isMobile, setAutoReadEnabled, stopSpeaking]);
   const [quoteSelectionEnabled, setQuoteSelectionEnabled] = useState(false);
   useEffect(() => {
     try {
@@ -2115,31 +2132,44 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
     setNewThreadDialogOpen(false);
   };
 
+  const renderCarModeButton = () => (
+    <button type="button" className="car-mode-toggle" aria-label={carMode ? "Exit car mode" : "Enter car mode"}
+      title={carMode ? "Exit car mode" : "Car mode"} aria-pressed={carMode}
+      disabled={!speechSynthesisSupported}
+      onClick={() => {
+        stopSpeaking();
+        setAutoReadEnabled(!carMode, { temporary: true });
+        setCarMode(!carMode);
+        if (!carMode) {
+          setSidebarOpen(false);
+          setRightPanelOpen(false);
+          setActiveTopPanel(null);
+          setMobileToolbarMoreOpen(false);
+        }
+      }}>
+      {carMode ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m5 7 2-4h10l2 4 2 3v9h-3v-3H6v3H3v-9l2-3Zm0 0h14M3 11h18M6 12v1m12-1v1" /></svg>}
+    </button>
+  );
+
   const renderRefreshButton = (mobile: boolean) => {
-    const covered = mobile && isNarrowMobile && mobileToolbarMoreOpen;
     return (
       <button
         type="button"
         onClick={() => window.location.reload()}
-        disabled={covered}
-        tabIndex={covered ? -1 : undefined}
-        aria-hidden={covered ? true : undefined}
+        data-toolbar-refresh={mobile ? "mobile" : "desktop"}
         title={translate("sidebar.refresh")}
         aria-label={translate("sidebar.refresh")}
         style={{
           display: "flex", alignItems: "center", justifyContent: "center",
           width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
-          visibility: covered ? "hidden" : "visible",
-          pointerEvents: covered ? "none" : "auto",
           background: "none", border: "none", borderLeft: "1px solid var(--border)",
           color: "var(--text-muted)", cursor: "pointer", flexShrink: 0,
           transition: "color 0.12s, background 0.12s",
         }}
         onMouseEnter={(event) => {
-          if (!covered) {
-            event.currentTarget.style.color = "var(--text)";
-            event.currentTarget.style.background = "var(--bg-hover)";
-          }
+          event.currentTarget.style.color = "var(--text)";
+          event.currentTarget.style.background = "var(--bg-hover)";
         }}
         onMouseLeave={(event) => {
           event.currentTarget.style.color = "var(--text-muted)";
@@ -2451,6 +2481,7 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
                 height: "100%",
               }}
             >
+              {!carMode && <>
               {isNarrowMobile && (
                 <button
                   type="button"
@@ -2486,8 +2517,10 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
               {renderSessionStatsButton(true)}
               {renderMainFileToggle(true)}
               {renderNewThreadButton(true)}
+              </>}
+              {renderCarModeButton()}
               {renderRefreshButton(true)}
-              {isNarrowMobile && mobileToolbarMoreOpen && (
+              {!carMode && isNarrowMobile && mobileToolbarMoreOpen && (
                 <div
                   id="mobile-toolbar-actions"
                   role="toolbar"
@@ -2496,12 +2529,13 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
                   style={{
                     position: "absolute",
                     top: 0,
-                    right: 0,
+                    right: TOP_BAR_ICON_BUTTON_SIZE * 2,
                     bottom: 0,
                     left: TOP_BAR_ICON_BUTTON_SIZE,
                     zIndex: 20,
                     display: "flex",
                     alignItems: "stretch",
+                    overflowX: "auto",
                     background: "color-mix(in srgb, var(--bg-panel) 94%, var(--bg))",
                     boxShadow: "4px 0 18px rgba(0,0,0,0.12)",
                     backdropFilter: "blur(10px)",
@@ -2813,6 +2847,8 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
               onSystemInfoLoaderChange={handleSystemInfoLoaderChange}
               onSessionStatsChange={handleSessionStatsChange}
               onSessionStatsPanelOpen={openSessionStatsPanel}
+              carMode={carMode && isMobile}
+              onStopSpeaking={stopSpeaking}
               onOpenSettings={openSettingsSection}
               onContextUsageChange={handleContextUsageChange}
               onExtensionStatusesChange={handleExtensionStatusesChange}
@@ -2830,6 +2866,7 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
               autoReadEnabled={autoReadEnabled}
               speechSynthesisSupported={speechSynthesisSupported}
               speakingResponseKey={speakingResponseKey}
+              speechProgress={speechProgress}
               onSpeakResponse={speakResponse}
               holdAudio={holdAudio}
             />
@@ -3024,7 +3061,7 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
         quoteSelectionEnabled={quoteSelectionEnabled}
         onQuoteSelectionChange={handleQuoteSelectionChange}
         autoReadEnabled={autoReadEnabled}
-        onAutoReadChange={setAutoReadEnabled}
+        onAutoReadChange={(enabled) => setAutoReadEnabled(enabled, { temporary: carMode })}
         speechSynthesisSupported={speechSynthesisSupported}
         onClose={() => {
           setSettingsSection(null);

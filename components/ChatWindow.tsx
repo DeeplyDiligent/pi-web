@@ -37,6 +37,8 @@ import { getTranscriptNotices, summarizeCacheMisses, type CacheMissSummary } fro
 import { cacheMissSummaryText, TRANSCRIPT_NOTICE_WARNING_COLOR, TranscriptNoticeLines } from "@/components/TranscriptNotices";
 import { findChatScrollAnchor, type ChatScrollPosition } from "@/lib/chat-scroll-position";
 import { getAssistantSpeechText } from "@/lib/speech-text";
+import type { SpeechProgressStore } from "@/lib/speech-follow";
+import { useSpeechFollow } from "@/hooks/useSpeechFollow";
 import {
   captureScrollDistance,
   getNextVisibleCount,
@@ -92,9 +94,12 @@ interface Props {
   onSoundToggle?: () => void;
   playDoneSound?: () => void;
   unlockAudio?: () => void;
+  carMode?: boolean;
+  onStopSpeaking?: () => void;
   autoReadEnabled?: boolean;
   speechSynthesisSupported?: boolean;
   speakingResponseKey?: string | null;
+  speechProgress?: SpeechProgressStore | null;
   onSpeakResponse?: (text: string, key: string, onComplete?: () => void) => void;
   /** Keeps the completion sound's audio running until the returned release is called. */
   holdAudio?: () => () => void;
@@ -254,7 +259,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, durationMs, cacheMis
   );
 }
 
-export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, newSessionContextBar, initialNewSessionChoices, onNewSessionChoicesChange, onAgentEnd, onToolEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onOpenSettings, onContextUsageChange, onExtensionStatusesChange, onOpenFile, onFilesUploaded, onOpenSubagent, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, holdAudio, autoReadEnabled = false, speechSynthesisSupported = false, speakingResponseKey = null, onSpeakResponse }: Props) {
+export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, newSessionContextBar, initialNewSessionChoices, onNewSessionChoicesChange, onAgentEnd, onToolEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onOpenSettings, onContextUsageChange, onExtensionStatusesChange, onOpenFile, onFilesUploaded, onOpenSubagent, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, holdAudio, carMode = false, onStopSpeaking, autoReadEnabled = false, speechSynthesisSupported = false, speakingResponseKey = null, speechProgress = null, onSpeakResponse }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const completionNotificationsEnabled = session?.relation?.kind !== "subagent";
@@ -332,6 +337,11 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   });
   const isStreaming = useStreamingSelector(streamingStore, selectIsStreaming);
   const sessionBusy = agentRunning || bashRunning || editingMessage;
+  const carConversationRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (carMode && !speechProgress?.getSnapshot() && carConversationRef.current) carConversationRef.current.scrollTop = carConversationRef.current.scrollHeight;
+  }, [carMode, messages, speechProgress]);
+  useSpeechFollow(speechProgress, carMode ? carConversationRef : scrollContainerRef, messages);
   const handledAutoReadRequestRef = useRef(0);
   const lastAutoReadKeyRef = useRef<string | null>(null);
   useEffect(() => {
@@ -368,13 +378,13 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     const text = getAssistantSpeechText(answer);
     handledAutoReadRequestRef.current = autoReadRequest;
     if (!text) return;
-    const key = `${session?.id ?? sessionIdRef.current ?? "new"}:${entryIds[finalAssistantIndex] ?? message.timestamp ?? finalAssistantIndex}`;
+    const key = `${session?.id ?? sessionIdRef.current ?? "new"}:${messageKeys[finalAssistantIndex] ?? message.timestamp ?? finalAssistantIndex}`;
     if (lastAutoReadKeyRef.current === key) return;
     lastAutoReadKeyRef.current = key;
     onSpeakResponse(text, key, () => {
       if (mountedRef.current && autoReadEnabledRef.current) chatInputRef?.current?.startSpeechRecording();
     });
-  }, [agentRunning, autoReadEnabled, autoReadRequest, chatInputRef, entryIds, messages, onSpeakResponse, session?.id, sessionIdRef, speechSynthesisSupported, isStreaming]);
+  }, [agentRunning, autoReadEnabled, autoReadRequest, chatInputRef, messageKeys, messages, onSpeakResponse, session?.id, sessionIdRef, speechSynthesisSupported, isStreaming]);
 
   const handleEditMessage = useCallback(async (entryId: string | null, message: UserMessage) => {
     const editable = await handleEdit(entryId, message);
@@ -1036,6 +1046,9 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   const chatInputElement = (
     <ChatInput
       ref={chatInputRef}
+      carMode={carMode}
+      speaking={speakingResponseKey !== null}
+      onStopSpeaking={onStopSpeaking}
       onSend={handleSend}
       onAbort={handleAbort}
       onSteer={agentRunning ? handleSteer : undefined}
@@ -1106,6 +1119,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   return (
     <div
       className="chat-content relative flex h-full min-w-0 flex-col overflow-hidden"
+      data-car-mode={carMode || undefined}
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
@@ -1168,7 +1182,22 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         {extensionCustomUi && (
           <ExtensionCustomPanel key={extensionCustomUi.id} request={extensionCustomUi} waitingCount={waitingExtensionCustomUiCount} onInput={sendExtensionCustomInput} />
         )}
-        {!isEmptyNew && <>
+        {carMode && <div ref={carConversationRef} className="car-conversation">
+          <p className="car-safety-note">Set up before driving. Keep your attention on the road.</p>
+          {(() => {
+            const lastUserIndex = messages.findLastIndex((message) => message.role === "user");
+            const user = messages[lastUserIndex];
+            const answerIndex = messages.findLastIndex((message, index) => index > lastUserIndex && message.role === "assistant" && getAssistantSpeechText(message).trim());
+            const answer = messages[answerIndex];
+            const userText = user?.role === "user" ? (typeof user.content === "string" ? user.content : user.content.filter((block) => block.type === "text").map((block) => block.text).join("\n")) : "";
+            return <>
+              {userText && <div className="car-user-message"><span>You</span><p>{userText}</p></div>}
+              {answer?.role === "assistant" && <div className="car-answer" data-speech-response-key={`${session?.id ?? sessionIdRef.current ?? "new"}:${messageKeys[answerIndex] ?? answer.timestamp ?? answerIndex}`}><span>Pi</span><MarkdownBody>{getAssistantSpeechText(answer)}</MarkdownBody></div>}
+              {sessionBusy && <p role="status">{phaseLabel(agentPhase, t, isCompacting) || "Waiting for response…"}</p>}
+            </>;
+          })()}
+        </div>}
+        {!carMode && !isEmptyNew && <>
         <div
           ref={scrollContainerRef}
           // The message list is the one place long output has to be dragged through,
@@ -1231,7 +1260,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                   }
                 }
                 if (options.showTimestamp !== undefined) showTimestamp = options.showTimestamp;
-                const responseSpeechKey = `${session?.id ?? sessionIdRef.current ?? "new"}:${entryIds[idx] ?? (msg as AgentMessage & { timestamp?: number }).timestamp ?? idx}`;
+                const responseSpeechKey = `${session?.id ?? sessionIdRef.current ?? "new"}:${messageKeys[idx] ?? (msg as AgentMessage & { timestamp?: number }).timestamp ?? idx}`;
                 const canSpeakResponse = speechSynthesisSupported && Boolean(onSpeakResponse) && msg.role === "assistant" && showTimestamp && keyPrefix !== "process";
                 const view = (
                   <MessageView
@@ -1268,7 +1297,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 // One shape with or without notices, so lines arriving on a reload do not remount the view.
                 if (!isVisible || currentRefIdx === undefined) return <Fragment key={`${keyPrefix}-${messageKey}`}>{view}{noticeLines}</Fragment>;
                 return (
-                  <div key={`${keyPrefix}-${messageKey}`} data-entry-id={entryIds[idx]} ref={options.attachRef === false ? undefined : attachVisibleRef(idx, currentRefIdx)}>
+                  <div key={`${keyPrefix}-${messageKey}`} data-entry-id={entryIds[idx]} data-speech-response-key={canSpeakResponse ? responseSpeechKey : undefined} ref={options.attachRef === false ? undefined : attachVisibleRef(idx, currentRefIdx)}>
                     {view}
                     {noticeLines}
                   </div>
@@ -1581,7 +1610,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
             composer's left edge (.new-session-brand, .new-session-meta and
             .new-session-context in app/globals.css; the side padding and
             width are inline here). */}
-        {isEmptyNew && (
+        {!carMode && isEmptyNew && (
           <div className="new-session-hero" style={{ paddingLeft: 16, paddingRight: isMobile ? 16 : 52 }}>
             <div className="new-session-hero-inner" style={{ maxWidth: "var(--chat-content-max-width, 820px)" }}>
               <div className="new-session-brand">
@@ -1608,7 +1637,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
           commandsDisabled={sessionBusy}
         />
       </div>
-      {isEmptyNew && <div className="min-h-0 flex-1" />}
+      {!carMode && isEmptyNew && <div className="min-h-0 flex-1" />}
     </div>
   );
 }

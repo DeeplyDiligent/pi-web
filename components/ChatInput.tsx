@@ -58,6 +58,9 @@ interface Props {
   isStreaming: boolean;
   /** Text-only composer without the session controls or outer spacing. */
   compact?: boolean;
+  carMode?: boolean;
+  speaking?: boolean;
+  onStopSpeaking?: () => void;
   model?: { provider: string; modelId: string } | null;
   isAutoModelSelection?: boolean;
   modelNames?: Record<string, string>;
@@ -698,6 +701,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   cwd,
   onAttachFiles,
   compact = false,
+  carMode = false, speaking = false, onStopSpeaking,
 }: Props, ref) {
   const { t } = useI18n();
   const { fontSize } = useChatAppearance();
@@ -781,6 +785,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const startSpeechRecordingRef = useRef<() => Promise<void>>(async () => {});
   const speechRangeRef = useRef<{ start: number; end: number } | null>(null);
   const speechPreviewRef = useRef<HTMLSpanElement>(null);
+  const carTranscriptRef = useRef<HTMLParagraphElement>(null);
   valueRef.current = value;
   attachedImagesRef.current = attachedImages;
 
@@ -1454,6 +1459,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   }, [clearSpeechTimers]);
 
   useEffect(() => () => cancelSpeechRecording(), [cancelSpeechRecording]);
+  const wasCarModeRef = useRef(carMode);
+  useEffect(() => {
+    if (wasCarModeRef.current && !carMode) cancelSpeechRecording();
+    wasCarModeRef.current = carMode;
+  }, [carMode, cancelSpeechRecording]);
 
   // Warm only the main composer, not the compact quoted-selection composer.
   useEffect(() => {
@@ -1491,6 +1501,16 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       window.removeEventListener("keyup", keyUp);
     };
   }, [compact, cancelSpeechRecording, finishSpeechRecording, speechStatus, startSpeechRecording]);
+
+  useLayoutEffect(() => {
+    const transcript = carTranscriptRef.current;
+    if (!carMode || !transcript) return;
+    const revealLatest = () => { transcript.scrollTop = transcript.scrollHeight; };
+    revealLatest();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(revealLatest);
+    observer?.observe(transcript);
+    return () => observer?.disconnect();
+  }, [carMode, speechCommitted, speechPreview, speechStatus, value]);
 
   // Keep the newest recognized words visible. A normal text-overflow ellipsis
   // preserves the beginning; live dictation needs the opposite behavior.
@@ -2092,6 +2112,45 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
 
 
 
+
+  if (carMode) {
+    const busy = speechStatus === "starting" || speechStatus === "transcribing";
+    const recording = speechStatus === "recording";
+    const transcript = [speechCommitted, speechPreview].filter(Boolean).join(" ");
+    return (
+      <fieldset className="car-voice-controls" disabled={builtinCommandPending}>
+        <p ref={carTranscriptRef} className="car-transcript" role="status" aria-live="polite">
+          {busy ? t(speechStatus === "starting" ? "chat.speechStarting" : "chat.speechTranscribing")
+            : recording ? transcript || t("chat.speechListening") : value || (speaking ? "Reading response aloud…" : isStreaming ? "Waiting for response…" : "Tap the microphone to speak")}
+        </p>
+        {speechError && <p role="alert" className="car-voice-error">{speechError}</p>}
+        <div className="car-voice-actions">
+          <button type="button" className="car-voice-primary" disabled={busy || isStreaming}
+            aria-label={recording ? "Pause recording" : t("chat.speechStart")}
+            aria-pressed={recording}
+            onClick={() => {
+              if (recording) void finishSpeechRecording();
+              else { onStopSpeaking?.(); void startSpeechRecording(); }
+            }}>
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
+              {recording ? <><path d="M8 5v14M16 5v14" /></> : <><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8" /></>}
+            </svg>
+            <span>{recording ? "Pause" : value.trim() ? "Continue speaking" : "Speak"}</span>
+          </button>
+          {(recording || value.trim()) && <button type="button" className="car-voice-send"
+            disabled={busy || isStreaming || attachmentUploadCount > 0} onClick={handleSpeechAwareSend}>
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20V4m-7 7 7-7 7 7" /></svg>
+            <span>{t("chat.send")}</span>
+          </button>}
+        </div>
+        <div className="car-voice-secondary">
+          {speechStatus !== "idle" && <button type="button" onClick={cancelSpeechRecording}>{t("chat.speechCancel")}</button>}
+          {speaking && <button type="button" onClick={onStopSpeaking}>Stop reading</button>}
+          {isStreaming && <button type="button" onClick={onAbort}>Stop response</button>}
+        </div>
+      </fieldset>
+    );
+  }
 
   return (
     <fieldset
