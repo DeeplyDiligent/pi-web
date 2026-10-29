@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { stripTypeScriptTypes } from "node:module";
 import test from "node:test";
 import vm from "node:vm";
+import ts from "typescript";
 import { createJiti } from "jiti";
 
 const source = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
@@ -89,13 +90,21 @@ test("a linked session that is gone gets no other session in its place (#1168)",
 });
 
 test("choosing another workspace creates a fresh thread without restoring its remembered session", () => {
-  const chooseStart = source.indexOf("  const handleNewThreadWorkspace =");
-  const chooseEnd = source.indexOf("  const renderRefreshButton", chooseStart);
+  const ast = ts.createSourceFile("AppShell.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  function findWorkspaceHandler(node) {
+    if (ts.isVariableDeclaration(node) && node.name.getText(ast) === "handleNewThreadWorkspace") {
+      return `const ${node.getText(ast)};`;
+    }
+    return ts.forEachChild(node, findWorkspaceHandler);
+  }
+  // Extract only this handler, not any JSX helpers added between toolbar functions.
+  const choose = findWorkspaceHandler(ast);
+  assert.ok(choose, "workspace chooser handler found");
   const callbacks = [
     callbackBody("restoreWorkspaceContext", "handleCwdChange"),
     callbackBody("handleCwdChange", "handleSelectSession"),
     callbackBody("handleNewSession", "hydrateSelectedSession"),
-    source.slice(chooseStart, chooseEnd),
+    choose,
   ].join("\n");
   let restoreAttempts = 0;
   const context = vm.createContext({
