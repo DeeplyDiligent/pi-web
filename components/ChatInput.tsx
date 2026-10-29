@@ -29,6 +29,7 @@ import { ImagePreview } from "./ImagePreview";
 import { DismissButton } from "./DismissButton";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useScreenWakeLock } from "@/hooks/useScreenWakeLock";
+import { insertSpeechTranscript } from "@/lib/speech-draft";
 import { useEnterSendMode } from "@/hooks/useEnterSendMode";
 import { useI18n } from "@/hooks/useI18n";
 import { useChatAppearance } from "@/hooks/useChatAppearance";
@@ -122,6 +123,7 @@ export interface ChatInputHandle {
   rekeyDraft: (previousKey: string, nextKey: string) => void;
   restoreSubmission: (text: string, images?: ChatDraftImage[], targetDraftKey?: string) => void;
   startSpeechRecording: () => void;
+  pauseSpeechRecording: () => Promise<void>;
   focus: () => void;
 }
 
@@ -783,6 +785,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const speechStopRequestedRef = useRef(false);
   const speechSendRequestedRef = useRef(false);
   const startSpeechRecordingRef = useRef<() => Promise<void>>(async () => {});
+  const pauseSpeechRecordingRef = useRef<() => Promise<void>>(async () => {});
+  const speechIdleWaitersRef = useRef<Array<() => void>>([]);
+  const resolveSpeechIdle = useCallback(() => {
+    for (const resolve of speechIdleWaitersRef.current.splice(0)) resolve();
+  }, []);
   const speechRangeRef = useRef<{ start: number; end: number } | null>(null);
   const speechPreviewRef = useRef<HTMLSpanElement>(null);
   const carTranscriptRef = useRef<HTMLParagraphElement>(null);
@@ -966,6 +973,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     },
     startSpeechRecording() {
       void startSpeechRecordingRef.current();
+    },
+    pauseSpeechRecording() {
+      return pauseSpeechRecordingRef.current();
     },
   }));
 
@@ -1251,20 +1261,17 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   }, [cwd]);
 
   const applySpeechTranscript = useCallback((transcript: string): string | null => {
-    const text = transcript.trim();
     const range = speechRangeRef.current;
-    if (!text || !range) return null;
-    const current = valueRef.current;
-    const before = current.slice(0, range.start);
-    const after = current.slice(range.end);
-    const leadingSpace = before && !/\s$/.test(before) ? " " : "";
-    const trailingSpace = after && !/^\s/.test(after) ? " " : "";
-    const inserted = leadingSpace + text + trailingSpace;
-    const next = before + inserted + after;
-    const cursor = before.length + leadingSpace.length + text.length;
-    range.end = range.start + inserted.length;
+    const inserted = insertSpeechTranscript(valueRef.current, range, transcript);
+    if (!inserted || !range) return null;
+    const next = inserted.value;
+    const cursor = inserted.cursor;
+    range.end = inserted.end;
     valueRef.current = next;
     setValue(next);
+    if (speechIdleWaitersRef.current.length && draftKeyRef.current) {
+      setDraft(draftKeyRef.current, { value: next, images: attachedImagesRef.current.map(imageToDraftImage) });
+    }
     setHistoryMenuOpen(false);
     updateAtQuery(next, cursor);
     requestAnimationFrame(() => {
@@ -1328,13 +1335,14 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       }
       void fetch(`/api/speech/session/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
     } finally {
-      speechEventsRef.current?.close();
-      speechEventsRef.current = null;
-      speechSessionIdRef.current = null;
-      speechRangeRef.current = null;
-      speechStopRequestedRef.current = false;
-      speechSendRequestedRef.current = false;
       if (generation === speechGenerationRef.current) {
+        speechEventsRef.current?.close();
+        speechEventsRef.current = null;
+        speechSessionIdRef.current = null;
+        speechRangeRef.current = null;
+        speechStopRequestedRef.current = false;
+        speechSendRequestedRef.current = false;
+        resolveSpeechIdle();
         setSpeechStatus("idle");
         setSpeechCommitted("");
         setSpeechPreview("");
@@ -1342,7 +1350,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         setSpeechElapsedSeconds(0);
       }
     }
-  }, [applySpeechTranscript, clearSpeechTimers, handleSend, queueSpeechAudio, t]);
+  }, [applySpeechTranscript, clearSpeechTimers, handleSend, queueSpeechAudio, resolveSpeechIdle, t]);
 
   const startSpeechRecording = useCallback(async () => {
     if (speechStatus !== "idle") return;
@@ -1357,12 +1365,13 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     speechSendRequestedRef.current = false;
     speechUploadRef.current = Promise.resolve();
     const input = textareaRef.current;
-    const start = input?.selectionStart ?? valueRef.current.length;
-    speechRangeRef.current = { start, end: input?.selectionEnd ?? start };
+    const start = carMode ? valueRef.current.length : input?.selectionStart ?? valueRef.current.length;
+    speechRangeRef.current = { start, end: carMode ? start : input?.selectionEnd ?? start };
     try {
       // Begin microphone capture first so speech is retained while Foundry loads
       // the model and opens its streaming session on the first use.
       const recorder = await startPcmRecorder(setSpeechLevel);
+      if (generation !== speechGenerationRef.current) { await recorder.cancel(); return; }
       speechRecorderRef.current = recorder;
       const response = await fetch("/api/speech/session", { method: "POST" });
       const result = await response.json() as { sessionId?: string; error?: string };
@@ -1406,6 +1415,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       setSpeechStatus("recording");
       if (speechStopRequestedRef.current) void finishSpeechRecording(speechSendRequestedRef.current);
     } catch (error) {
+      if (generation !== speechGenerationRef.current) return;
       clearSpeechTimers();
       await speechRecorderRef.current?.cancel();
       speechRecorderRef.current = null;
@@ -1419,10 +1429,19 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         setSpeechLevel(0);
         setSpeechElapsedSeconds(0);
         setSpeechError(error instanceof Error ? error.message : t("chat.speechFailed"));
+        resolveSpeechIdle();
       }
     }
-  }, [clearSpeechTimers, finishSpeechRecording, queueSpeechAudio, speechStatus, t]);
+  }, [carMode, clearSpeechTimers, finishSpeechRecording, queueSpeechAudio, resolveSpeechIdle, speechStatus, t]);
   startSpeechRecordingRef.current = startSpeechRecording;
+  pauseSpeechRecordingRef.current = () => {
+    if (speechStatus === "idle") return Promise.resolve();
+    const idle = new Promise<void>((resolve) => speechIdleWaitersRef.current.push(resolve));
+    speechStopRequestedRef.current = true;
+    speechSendRequestedRef.current = false;
+    if (speechStatus === "recording") void finishSpeechRecording();
+    return idle;
+  };
 
   const handleSpeechAwareSend = useCallback(() => {
     if (speechStatus === "recording") {
@@ -1456,7 +1475,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     setSpeechPreview("");
     setSpeechLevel(0);
     setSpeechElapsedSeconds(0);
-  }, [clearSpeechTimers]);
+    resolveSpeechIdle();
+  }, [clearSpeechTimers, resolveSpeechIdle]);
 
   useEffect(() => () => cancelSpeechRecording(), [cancelSpeechRecording]);
   const wasCarModeRef = useRef(carMode);
@@ -2116,13 +2136,15 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   if (carMode) {
     const busy = speechStatus === "starting" || speechStatus === "transcribing";
     const recording = speechStatus === "recording";
-    const transcript = [speechCommitted, speechPreview].filter(Boolean).join(" ");
+    const liveText = [speechCommitted, speechPreview].filter(Boolean).join(" ");
+    const transcript = insertSpeechTranscript(value, speechRangeRef.current, liveText)?.value ?? value;
     return (
       <fieldset className="car-voice-controls" disabled={builtinCommandPending}>
         <p ref={carTranscriptRef} className="car-transcript" role="status" aria-live="polite">
-          {busy ? t(speechStatus === "starting" ? "chat.speechStarting" : "chat.speechTranscribing")
-            : recording ? transcript || t("chat.speechListening") : value || (speaking ? "Reading response aloud…" : isStreaming ? "Waiting for response…" : "Tap the microphone to speak")}
+          {transcript || (busy ? t(speechStatus === "starting" ? "chat.speechStarting" : "chat.speechTranscribing")
+            : recording ? t("chat.speechListening") : speaking ? "Reading response aloud…" : isStreaming ? "Waiting for response…" : "Tap the microphone to speak")}
         </p>
+        {busy && transcript && <p role="status">{t(speechStatus === "starting" ? "chat.speechStarting" : "chat.speechTranscribing")}</p>}
         {speechError && <p role="alert" className="car-voice-error">{speechError}</p>}
         <div className="car-voice-actions">
           <button type="button" className="car-voice-primary" disabled={busy || isStreaming}

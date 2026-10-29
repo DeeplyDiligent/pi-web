@@ -14,6 +14,7 @@ function setup(fetch) {
   const context = vm.createContext({
     AbortController,
     requestRef: { current: null },
+    preparing: false,
     fetch,
     onSelect: (workspace) => selections.push(JSON.parse(JSON.stringify(workspace))),
     setBusy: (busy) => { context.busy = busy; },
@@ -30,7 +31,7 @@ test("both toolbar New buttons open the same workspace chooser without creating 
   assert.match(shell, /onNewSession=\{handleNewSession\}/);
   assert.match(shell, /onClick=\{requestNewSession\}/);
   assert.match(shell, /setNewThreadDialogOpen\(true\)/);
-  assert.match(shell, /<NewThreadDialog[\s\S]*?onCancel=\{\(\) => setNewThreadDialogOpen\(false\)\}/);
+  assert.match(shell, /<NewThreadDialog[\s\S]*?preparing=\{newThreadPreparing\}[\s\S]*?onCancel=\{\(\) => \{[\s\S]*?setNewThreadDialogOpen\(false\)/);
   assert.match(shell, /onRequestNewSession=\{requestNewSession\}/);
   assert.match(sidebar, /onClick=\{onRequestNewSession\}/);
   assert.doesNotMatch(sidebar, /disabled=\{!newSessionTarget\}/);
@@ -53,6 +54,20 @@ test("validates the selected folder before creating a thread and uses canonical 
   await context.select("c:/projects/one");
   assert.deepEqual(selections, [workspace]);
   assert.equal(context.busy, false);
+});
+
+test("a recording must settle before the chooser can create a thread", async () => {
+  let requests = 0;
+  const { context, selections } = setup(async () => { requests++; return { ok: true, json: async () => ({ cwd: "/project", projectRoot: "/project", projectKey: "/project" }) }; });
+  context.preparing = true;
+  await context.select("/project");
+  assert.equal(requests, 0);
+  assert.deepEqual(selections, []);
+  context.preparing = false;
+  await context.select("/project");
+  assert.equal(requests, 1);
+  assert.equal(selections.length, 1);
+  assert.match(source, /disabled=\{busy \|\| preparing\}/);
 });
 
 test("missing or removed workspaces stay in the chooser with an error", async () => {

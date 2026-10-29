@@ -212,6 +212,8 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
   const [newSessionDraftId, setNewSessionDraftId] = useState("initial");
   const [newThreadDialogOpen, setNewThreadDialogOpen] = useState(false);
+  const [newThreadPreparing, setNewThreadPreparing] = useState(false);
+  const newThreadPreparationRef = useRef(0);
   const activeNewSessionDraftKeyRef = useRef<string | null>(null);
   // The bar above a fresh composer (NewSessionContextBar): the sidebar reports
   // what it shows and carries out its moves, which remount the composer. Its
@@ -990,7 +992,7 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
     activeProjectKeyRef.current = targetProject;
     // A draft parked in this cwd comes back, unless one was carried here: it
     // stays parked for the next time, never merged into what was carried.
-    if (!getDraft(draftKey)) rekeyDraft(parkedNewSessionDraftKey(cwd), draftKey);
+    if (!options?.freshDraft && !getDraft(draftKey)) rekeyDraft(parkedNewSessionDraftKey(cwd), draftKey);
     activeNewSessionDraftKeyRef.current = draftKey;
     setNewSessionDraftId(sessionId);
     setSelectedSession(null);
@@ -1018,9 +1020,17 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
   }, [activeCwd, changeFileWorkspace, invalidateWorkspaceRestore, isMobile, newSessionCwd, router, selectedSession]);
 
   const requestNewSession = useCallback(() => {
+    stopSpeaking();
+    const preparation = ++newThreadPreparationRef.current;
     setMobileToolbarMoreOpen(false);
+    setNewThreadPreparing(true);
     setNewThreadDialogOpen(true);
-  }, []);
+    // Keep the chooser usable for Cancel, but do not switch composers until
+    // the old recording has finalized and its draft has been saved.
+    void Promise.resolve(chatInputRef.current?.pauseSpeechRecording()).finally(() => {
+      if (newThreadPreparationRef.current === preparation) setNewThreadPreparing(false);
+    });
+  }, [stopSpeaking]);
 
   // Global keyboard shortcuts (handles Esc, Ctrl+Alt+N etc.)
   useGlobalKeyboardShortcuts({
@@ -2128,7 +2138,7 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
     const id = typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
       : `workspace-${Date.now()}`;
-    handleNewSession(id, workspace.cwd, workspace.projectKey);
+    handleNewSession(id, workspace.cwd, workspace.projectKey, { freshDraft: true });
     setNewThreadDialogOpen(false);
   };
 
@@ -2268,7 +2278,12 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
       <NewThreadDialog
         sessions={sessionsWithSelection}
         currentCwd={activeCwd}
-        onCancel={() => setNewThreadDialogOpen(false)}
+        preparing={newThreadPreparing}
+        onCancel={() => {
+          newThreadPreparationRef.current++;
+          setNewThreadPreparing(false);
+          setNewThreadDialogOpen(false);
+        }}
         onSelect={handleNewThreadWorkspace}
       />
     )}
@@ -2516,8 +2531,9 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
               {!isNarrowMobile && renderChatToolbarActions(true)}
               {renderSessionStatsButton(true)}
               {renderMainFileToggle(true)}
-              {renderNewThreadButton(true)}
               </>}
+              {carMode && <div style={{ flex: 1 }} />}
+              {renderNewThreadButton(true)}
               {renderCarModeButton()}
               {renderRefreshButton(true)}
               {!carMode && isNarrowMobile && mobileToolbarMoreOpen && (
@@ -2863,7 +2879,7 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
               onSoundToggle={onSoundToggle}
               playDoneSound={playDoneSound}
               unlockAudio={unlockAudio}
-              autoReadEnabled={autoReadEnabled}
+              autoReadEnabled={autoReadEnabled && !newThreadDialogOpen}
               speechSynthesisSupported={speechSynthesisSupported}
               speakingResponseKey={speakingResponseKey}
               speechProgress={speechProgress}

@@ -74,7 +74,73 @@ test("simplified composer reuses recording, pause, final transcription and send"
   assert.match(css, /30dvh/);
 });
 
+test("new-chat opens the same chooser, stops playback and waits for transcription", async () => {
+  const ast = ts.createSourceFile("AppShell.tsx", shell, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  function find(node) {
+    if (ts.isVariableDeclaration(node) && node.name.getText(ast) === "requestNewSession") return node.initializer.arguments[0];
+    return ts.forEachChild(node, find);
+  }
+  const callback = ts.transpileModule(find(ast).getText(ast), { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText.trim().replace(/;$/, "");
+  const pending = [];
+  const generation = { current: 0 };
+  const state = { open: false, preparing: false, stopped: 0 };
+  const request = new Script(`(${callback})`).runInNewContext({ Promise,
+    stopSpeaking() { state.stopped++; }, newThreadPreparationRef: generation,
+    setMobileToolbarMoreOpen() {}, setNewThreadDialogOpen(value) { state.open = value; }, setNewThreadPreparing(value) { state.preparing = value; },
+    chatInputRef: { current: { pauseSpeechRecording() { const result = Promise.withResolvers(); pending.push(result); return result.promise; } } },
+  });
+  request();
+  assert.equal(state.open, true);
+  assert.equal(state.preparing, true);
+  assert.equal(state.stopped, 1);
+  pending[0].resolve();
+  await new Promise(setImmediate);
+  assert.equal(state.preparing, false);
+  request();
+  generation.current++; // Cancel closes the chooser and invalidates its pending readiness callback.
+  state.open = false;
+  state.preparing = false;
+  pending[1].resolve();
+  await new Promise(setImmediate);
+  assert.equal(state.open, false);
+  assert.equal(state.preparing, false);
+  assert.match(shell, /autoReadEnabled=\{autoReadEnabled && !newThreadDialogOpen\}/);
+});
+
+test("navigation pause waits through microphone startup and final transcription", async () => {
+  const ast = ts.createSourceFile("ChatInput.tsx", input, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  function find(node) {
+    if (ts.isBinaryExpression(node) && node.left.getText(ast) === "pauseSpeechRecordingRef.current") return node.right;
+    return ts.forEachChild(node, find);
+  }
+  const callback = ts.transpileModule(find(ast).getText(ast), { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText.trim().replace(/;$/, "");
+  for (const speechStatus of ["idle", "starting", "recording", "transcribing"]) {
+    const waiters = { current: [] };
+    const stop = { current: false };
+    const send = { current: true };
+    let finishes = 0;
+    const pause = new Script(`(${callback})`).runInNewContext({ Promise, speechStatus, speechIdleWaitersRef: waiters,
+      speechStopRequestedRef: stop, speechSendRequestedRef: send, finishSpeechRecording() { finishes++; } });
+    let settled = false;
+    const result = pause().then(() => { settled = true; });
+    await Promise.resolve();
+    assert.equal(settled, speechStatus === "idle");
+    if (speechStatus !== "idle") {
+      assert.equal(stop.current, true);
+      assert.equal(send.current, false, "new-chat never submits the old draft");
+      assert.equal(finishes, speechStatus === "recording" ? 1 : 0);
+      waiters.current.splice(0).forEach((resolve) => resolve());
+    }
+    await result;
+    assert.equal(settled, true);
+  }
+  assert.match(input, /insertSpeechTranscript\(value, speechRangeRef.current, liveText\)/);
+  assert.match(input, /const start = carMode \? valueRef.current.length/);
+});
+
 test("car view keeps extension dialogs and the same voice handoff", () => {
+  assert.doesNotMatch(chat, /Set up before driving|Keep your attention on the road|car-safety-note/);
+  assert.doesNotMatch(css, /car-safety-note/);
   assert.match(chat, /<ExtensionDialog/);
   assert.match(chat, /<ExtensionCustomPanel/);
   assert.match(chat, /carMode=\{carMode\}/);

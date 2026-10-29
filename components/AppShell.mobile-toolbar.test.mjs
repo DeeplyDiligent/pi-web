@@ -54,7 +54,7 @@ test("keeps covered statistics and file controls out of interaction and focus", 
 });
 
 test("keeps Refresh last, with the mobile car control directly to its left", () => {
-  assert.match(source, /renderMainFileToggle\(true\)\}\s*\{renderNewThreadButton\(true\)\}/);
+  assert.match(source, /renderMainFileToggle\(true\)\}\s*<\/>\}\s*\{carMode && <div style=\{\{ flex: 1 \}\} \/>\}\s*\{renderNewThreadButton\(true\)\}/);
   assert.match(source, /\{renderCarModeButton\(\)\}\s*\{renderRefreshButton\(true\)\}/);
   assert.match(source, /renderMainFileToggle\(false\)\}\s*\{renderNewThreadButton\(false\)\}\s*\{renderRefreshButton\(false\)\}/);
   const refresh = source.slice(source.indexOf("const renderRefreshButton"), source.indexOf("const renderNewThreadButton"));

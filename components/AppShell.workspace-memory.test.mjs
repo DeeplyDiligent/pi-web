@@ -10,12 +10,15 @@ const source = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8"
 const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
 const draftStore = await jiti.import("@/lib/draft-store");
 
-function callbackBody(name, nextName) {
-  const start = source.indexOf(`const ${name} = useCallback`);
-  const end = source.indexOf(`\n  const ${nextName}`, start);
-  assert.notEqual(start, -1, `${name} callback not found`);
-  assert.notEqual(end, -1, `${nextName} callback not found after ${name}`);
-  return source.slice(start, end);
+const shellAst = ts.createSourceFile("AppShell.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+function callbackBody(name) {
+  function find(node) {
+    if (ts.isVariableDeclaration(node) && node.name.getText(shellAst) === name) return `const ${node.getText(shellAst)};`;
+    return ts.forEachChild(node, find);
+  }
+  const callback = find(shellAst);
+  assert.ok(callback, `${name} callback found`);
+  return callback;
 }
 
 test("a linked session that is gone gets no other session in its place (#1168)", async (t) => {
@@ -149,6 +152,18 @@ test("choosing another workspace creates a fresh thread without restoring its re
   assert.equal(context.fileTabs.length, 0);
   assert.equal(context.newThreadDialogOpen, false);
   assert.equal(restoreAttempts, 0);
+
+  // Explicit New in the same workspace must not put the old dictation into
+  // the new chat. It remains parked for recovery instead.
+  const previousDraftKey = context.activeNewSessionDraftKeyRef.current;
+  draftStore.setDraft(previousDraftKey, { value: "Previously dictated words", images: [] });
+  context.choose({ cwd: "/new", projectRoot: "/new", projectKey: "canonical-new" });
+  const nextDraftKey = context.activeNewSessionDraftKeyRef.current;
+  assert.notEqual(nextDraftKey, previousDraftKey);
+  assert.equal(draftStore.getDraft(nextDraftKey), null);
+  const parkedKey = vm.runInContext('parkedNewSessionDraftKey("/new")', context);
+  assert.equal(draftStore.getDraft(parkedKey)?.value, "Previously dictated words");
+  draftStore.clearDraft(parkedKey);
 });
 
 test("New restores the draft after session navigation and workspace auto-restore", async (t) => {

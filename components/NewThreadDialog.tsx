@@ -13,11 +13,12 @@ export interface NewThreadWorkspace {
   projectKey: string;
 }
 
-export function NewThreadDialog({ sessions, currentCwd, onCancel, onSelect }: {
+export function NewThreadDialog({ sessions, currentCwd, onCancel, onSelect, preparing = false }: {
   sessions: readonly SessionInfo[];
   currentCwd: string | null;
   onCancel: () => void;
   onSelect: (workspace: NewThreadWorkspace) => void;
+  preparing?: boolean;
 }) {
   const { t } = useI18n();
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -44,7 +45,7 @@ export function NewThreadDialog({ sessions, currentCwd, onCancel, onSelect }: {
   }, [browsing]);
 
   const selectWorkspace = async (cwd: string) => {
-    if (requestRef.current) return;
+    if (preparing || requestRef.current) return;
     const controller = new AbortController();
     requestRef.current = controller;
     setBusy(true);
@@ -76,7 +77,7 @@ export function NewThreadDialog({ sessions, currentCwd, onCancel, onSelect }: {
   if (browsing) {
     return (
       <div onKeyDown={(event) => event.stopPropagation()}>
-        <DirectoryPicker initialPath={currentCwd ?? undefined} busy={busy} error={error} onSelect={(cwd) => void selectWorkspace(cwd)} onCancel={() => { setBrowsing(false); setError(null); }} />
+        <DirectoryPicker initialPath={currentCwd ?? undefined} busy={busy || preparing} error={error} onSelect={(cwd) => void selectWorkspace(cwd)} onCancel={() => { setBrowsing(false); setError(null); }} />
       </div>
     );
   }
@@ -86,7 +87,7 @@ export function NewThreadDialog({ sessions, currentCwd, onCancel, onSelect }: {
       ref={dialogRef}
       aria-labelledby="new-thread-workspace-title"
       aria-modal="true"
-      aria-busy={busy}
+      aria-busy={busy || preparing}
       onCancel={(event) => { event.preventDefault(); if (!busy) onCancel(); }}
       onKeyDown={(event) => {
         // Escape must dismiss this dialog, not abort an agent behind it.
@@ -100,10 +101,11 @@ export function NewThreadDialog({ sessions, currentCwd, onCancel, onSelect }: {
           <h2 id="new-thread-workspace-title" style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>{t("chat.chooseWorkspace")}</h2>
           <button type="button" onClick={onCancel} disabled={busy} aria-label={t("chat.close")} style={{ width: 32, height: 32, border: "none", background: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 22 }}>×</button>
         </div>
-        <ProjectPicker projects={projects} selectedKey={selectedKey} disabled={busy} onSelect={(project) => void selectWorkspace(project.root)} />
+        {preparing && <div role="status" style={{ padding: "10px 16px", color: "var(--text-muted)", fontSize: 12 }}>{t("chat.speechTranscribing")}</div>}
+        <ProjectPicker projects={projects} selectedKey={selectedKey} disabled={busy || preparing} onSelect={(project) => void selectWorkspace(project.root)} />
         {error && <div role="alert" style={{ padding: "10px 16px", color: "#ef4444", fontSize: 12 }}>{error}</div>}
         <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
-          <button type="button" disabled={busy} onClick={() => { setError(null); setBrowsing(true); }} style={{ padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg-hover)", color: "var(--text)", cursor: "pointer", fontSize: 12 }}>{t("sidebar.customPath")}</button>
+          <button type="button" disabled={busy || preparing} onClick={() => { setError(null); setBrowsing(true); }} style={{ padding: "8px 10px", border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg-hover)", color: "var(--text)", cursor: "pointer", fontSize: 12 }}>{t("sidebar.customPath")}</button>
         </div>
       </div>
     </dialog>

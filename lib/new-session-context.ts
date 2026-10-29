@@ -37,6 +37,8 @@ export interface NewSessionTarget {
 
 /** How the shell starts a new session (`onNewSession`'s last argument). */
 export interface NewSessionOptions {
+  /** The explicit New-chat chooser starts empty, leaving parked drafts untouched. */
+  freshDraft?: boolean;
   /** Move the fresh composer's draft and model picks to the new one instead of parking the draft. */
   carryComposer?: boolean;
 }

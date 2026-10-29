@@ -1183,7 +1183,6 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
           <ExtensionCustomPanel key={extensionCustomUi.id} request={extensionCustomUi} waitingCount={waitingExtensionCustomUiCount} onInput={sendExtensionCustomInput} />
         )}
         {carMode && <div ref={carConversationRef} className="car-conversation">
-          <p className="car-safety-note">Set up before driving. Keep your attention on the road.</p>
           {(() => {
             const lastUserIndex = messages.findLastIndex((message) => message.role === "user");
             const user = messages[lastUserIndex];
