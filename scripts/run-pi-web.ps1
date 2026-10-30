@@ -1,9 +1,14 @@
+param(
+  [switch]$InstallOnly
+)
+
 $ErrorActionPreference = 'Stop'
 
 $installDir = Join-Path $PSScriptRoot '.pi-web'
 $server = Join-Path $installDir 'node_modules\.bin\pi-web-server.cmd'
 $packageJson = Join-Path $installDir 'node_modules\@agegr\pi-web\package.json'
 $releaseCache = Join-Path $installDir 'installed-release-url.txt'
+$hasCachedInstall = (Test-Path $server) -and (Test-Path $releaseCache)
 
 $node = Get-Command node.exe -ErrorAction SilentlyContinue
 $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
@@ -58,7 +63,7 @@ try {
     Select-Object -First 1 -ExpandProperty browser_download_url
   if (-not $url) { throw 'No .tgz asset found in the latest pi-web release' }
 
-  if (Test-Path $server) {
+  if ($hasCachedInstall) {
     $installedVersion = $null
     if (Test-Path $packageJson) {
       try {
@@ -72,14 +77,14 @@ try {
       (Get-Content -LiteralPath $releaseCache -Raw).Trim()
     }
     $releaseVersion = $release.tag_name -replace '^v', ''
-    if (($installedVersion -and $installedVersion -eq $releaseVersion) -or $cachedUrl -eq $url) {
+    if ($cachedUrl -eq $url -and (-not $installedVersion -or $installedVersion -eq $releaseVersion)) {
       Write-Host "Using cached pi-web install at $installDir (release $($release.tag_name))"
       $url = $null
     }
   }
 }
 catch {
-  if (Test-Path $server) {
+  if ($hasCachedInstall) {
     Write-Warning "Could not check for the latest pi-web release ($($_.Exception.Message)); using cached install at $installDir"
     $url = $null
   }
@@ -109,20 +114,45 @@ try {
 
   if ($url) {
     Write-Host "Installing pi-web release $($release.tag_name)..."
+    if (Test-Path $releaseCache) {
+      Remove-Item -LiteralPath $releaseCache
+    }
     $proxyArgs = @()
     if ($proxyUrl) {
       $proxyArgs = @("--proxy=$proxyUrl", "--https-proxy=$proxyUrl")
     }
-    & $npm.Source install --prefix "$installDir" --no-save --package-lock=false --no-audit --no-fund `
+    # Extract first so the SDK's hardcoded NuGet feeds can be updated before its install script runs.
+    & $npm.Source install --prefix "$installDir" --ignore-scripts --no-save --package-lock=false --no-audit --no-fund `
       @proxyArgs -- "$url"
     if ($LASTEXITCODE -ne 0) {
       throw "npm install failed (exit code $LASTEXITCODE)"
+    }
+
+    $foundryInstaller = Join-Path $installDir 'node_modules\foundry-local-sdk\script\install-utils.cjs'
+    if (Test-Path $foundryInstaller) {
+      $installerSource = [System.IO.File]::ReadAllText($foundryInstaller)
+      $nugetProxy = 'https://packagefeedproxy.microsoft.io/nuget/v3/index.json'
+      if (-not $installerSource.Contains("'$nugetProxy'")) {
+        $primaryFeed = "'https://api.nuget.org/v3/index.json',"
+        if (-not $installerSource.Contains($primaryFeed)) {
+          throw 'Foundry SDK feed configuration has changed; cannot safely add the NuGet proxy fallback.'
+        }
+        $installerSource = $installerSource.Replace($primaryFeed, "$primaryFeed`n    '$nugetProxy',")
+        [System.IO.File]::WriteAllText($foundryInstaller, $installerSource, (New-Object System.Text.UTF8Encoding($false)))
+      }
+      Write-Host "Foundry NuGet fallback: $nugetProxy"
+    }
+
+    & $npm.Source rebuild --prefix "$installDir" --foreground-scripts @proxyArgs
+    if ($LASTEXITCODE -ne 0) {
+      throw "npm rebuild failed (exit code $LASTEXITCODE)"
     }
     if (-not (Test-Path $server)) { throw "pi-web-server not found at $server" }
     Set-Content -LiteralPath $releaseCache -Value $url -Encoding UTF8
   }
 
   if (-not (Test-Path $server)) { throw "pi-web-server not found at $server" }
+  if ($InstallOnly) { return }
   & $server
   if ($LASTEXITCODE -ne 0) { throw "pi-web-server failed (exit code $LASTEXITCODE)" }
 }
