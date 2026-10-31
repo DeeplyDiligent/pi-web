@@ -525,3 +525,15 @@ test("shows a user message's HTML as the text typed, like pi's TUI", () => {
   assert.match(mixed, /&lt;p&gt;code&lt;\/p&gt;/);
   assert.match(renderMarkdown("normal <kbd>Ctrl</kbd>"), /<kbd>Ctrl<\/kbd>/);
 });
+
+test("only car answers opt into speech word spans, preserving Markdown and code/math renderers", () => {
+  const sample = "Café, **bold words** and [linked text](https://example.com). Don't stop!\n\n- list item\n\n`inline code`\n\n```text\nfenced code\n```\n\n$x + 1$";
+  const normal = renderMarkdown(sample);
+  const car = renderMarkdown(sample, { speechWords: true });
+  assert.doesNotMatch(normal, /data-speech-word/);
+  assert.match(car, /<span data-speech-word="">Café<\/span>/);
+  assert.match(car, /<strong><span data-speech-word="">bold<\/span> <span data-speech-word="">words<\/span><\/strong>/);
+  assert.match(car, /<span data-speech-word="">Don&#x27;t<\/span>/);
+  assert.equal(car.replace(/<span data-speech-word="">([^<]*)<\/span>/g, "$1"), normal);
+  assert.doesNotMatch(car, /data-speech-current-word/, "no word is highlighted until speech starts");
+});

@@ -57,7 +57,7 @@ export const CarConversation = memo(function CarConversation({ messages, message
       {rows.map((row) => row.role === "user"
         ? <div key={keyOf(row.index)} className="car-user-message"><span>You</span><p>{row.text}</p></div>
         : <div key={keyOf(row.index)} className="car-answer" data-speech-response-key={keyOf(row.index)}><span>Pi</span>
-            <MarkdownBody cwd={cwd} onOpenFile={onOpenFile}>{row.text}</MarkdownBody>
+            <MarkdownBody cwd={cwd} onOpenFile={onOpenFile} speechWords>{row.text}</MarkdownBody>
           </div>)}
       {busyLabel && <p role="status">{busyLabel}</p>}
     </div>

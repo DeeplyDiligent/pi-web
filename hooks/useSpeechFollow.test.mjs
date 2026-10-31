@@ -9,49 +9,112 @@ const { renderHook } = await import(shimPath);
 const { useSpeechFollow } = await jiti.import("./useSpeechFollow.ts");
 const { createSpeechProgressStore } = await jiti.import("../lib/speech-follow.ts");
 
-test("speech follows the matching response in its own scroller and ignores stopped speech", () => {
+function fixture(t) {
   const text = "one two three four five six seven eight nine ten";
   let scroll = 0;
-  const node = { data: text, length: text.length, parentElement: { closest: (selector) => selector === ".markdown-body" ? {} : null } };
-  const root = { dataset: { speechResponseKey: "session:answer" }, contains: (candidate) => candidate === node };
+  const elements = text.split(" ").map(() => {
+    const attributes = new Set();
+    return { attributes, setAttribute(name) { attributes.add(name); }, removeAttribute(name) { attributes.delete(name); } };
+  });
+  const nodes = text.split(" ").map((data, index) => ({ data, length: data.length, index,
+    parentElement: { closest: (selector) => selector === ".markdown-body" ? {} : selector === "[data-speech-word]" ? elements[index] : null },
+  }));
+  const root = { dataset: { speechResponseKey: "session:answer" }, contains: (candidate) => nodes.includes(candidate) };
   const container = {
     querySelectorAll: () => [root],
     get scrollTop() { return scroll; },
     set scrollTop(value) { scroll = Math.max(0, value); },
     getBoundingClientRect: () => ({ top: 100, bottom: 300, height: 200 }),
   };
+  const originalDocument = globalThis.document;
+  const originalNodeFilter = globalThis.NodeFilter;
   globalThis.NodeFilter = { SHOW_TEXT: 4 };
   globalThis.document = {
     createTreeWalker() {
-      let visited = false;
-      return { currentNode: node, nextNode() { if (visited) return false; visited = true; return true; } };
+      let index = -1;
+      return { get currentNode() { return nodes[index]; }, nextNode() { return ++index < nodes.length; } };
     },
     createRange() {
-      let start = 0;
+      let index = 0;
       return {
-        setStart(_node, offset) { assert.equal(_node, node); start = offset; },
-        setEnd(_node) { assert.equal(_node, node); },
-        getBoundingClientRect: () => ({ top: 100 + start * 10 - scroll, bottom: 120 + start * 10 - scroll, height: 20 }),
+        setStart(node) { index = node.index; },
+        setEnd() {},
+        getBoundingClientRect: () => ({ top: 100 + index * 50 - scroll, bottom: 120 + index * 50 - scroll, height: 20 }),
       };
     },
   };
-  const ref = { current: container };
-  const progress = (charIndex, key = "session:answer") => ({ text, charIndex, key });
+  t.after(() => {
+    if (originalDocument === undefined) delete globalThis.document; else globalThis.document = originalDocument;
+    if (originalNodeFilter === undefined) delete globalThis.NodeFilter; else globalThis.NodeFilter = originalNodeFilter;
+  });
   const store = createSpeechProgressStore();
-  store.set(progress(0));
-  const hook = renderHook(() => useSpeechFollow(store, ref, "view"));
-  assert.equal(scroll, 0);
-  // Boundary events scroll without re-rendering the hook or the transcript.
-  store.set(progress(text.indexOf("nine")));
-  assert.ok(scroll > 0);
-  const followed = scroll;
-  store.set(null);
-  assert.equal(scroll, followed);
-  store.set(progress(0, "different-session:answer"));
-  assert.equal(scroll, followed);
+  const progress = (word, key = "session:answer") => ({ text, charIndex: text.indexOf(word), key });
+  return { text, nodes, elements, store, progress, ref: { current: container }, scroll: () => scroll,
+    highlighted: () => elements.flatMap((element, index) => element.attributes.has("data-speech-current-word") ? [nodes[index].data] : []),
+  };
+}
+
+test("car speech follows and bolds only the current word, without rendering or splitting text", (t) => {
+  const f = fixture(t);
+  f.store.set(f.progress("one"));
+  let renders = 0;
+  const hook = renderHook(() => { renders++; useSpeechFollow(f.store, f.ref, "view"); });
+  t.after(() => hook.unmount());
+  assert.equal(f.scroll(), 0);
+  assert.deepEqual(f.highlighted(), ["one"]);
+  f.store.set(f.progress("nine"));
+  assert.ok(f.scroll() > 0);
+  assert.deepEqual(f.highlighted(), ["nine"]);
+  assert.equal(renders, 1, "word boundaries do not re-render the transcript");
+  assert.equal(f.nodes.map((node) => node.data).join(" "), f.text, "React-owned text stays intact");
+  const followed = f.scroll();
+  f.store.set(null);
+  assert.deepEqual(f.highlighted(), []);
+  assert.equal(f.scroll(), followed);
+  f.store.set(f.progress("one", "different-session:answer"));
+  assert.deepEqual(f.highlighted(), []);
+  assert.equal(f.scroll(), followed);
+  f.store.set(f.progress("one"));
+  assert.deepEqual(f.highlighted(), ["one"]);
   hook.unmount();
-  store.set(progress(0));
-  assert.equal(scroll, followed, "unmount removes the speech subscription");
-  delete globalThis.NodeFilter;
-  delete globalThis.document;
+  assert.deepEqual(f.highlighted(), []);
+  const stopped = f.scroll();
+  f.store.set(f.progress("ten"));
+  assert.equal(f.scroll(), stopped, "unmount removes the speech subscription");
+});
+
+test("normal mode never follows speech, and leaving car mode clears the highlight and subscription", (t) => {
+  const f = fixture(t);
+  let carMode = false;
+  f.store.set(f.progress("nine"));
+  const hook = renderHook(() => useSpeechFollow(carMode ? f.store : null, f.ref, "view"));
+  t.after(() => hook.unmount());
+  assert.equal(f.scroll(), 0);
+  assert.deepEqual(f.highlighted(), []);
+  f.store.set(f.progress("ten"));
+  assert.equal(f.scroll(), 0);
+  carMode = true;
+  hook.rerender();
+  assert.ok(f.scroll() > 0);
+  assert.deepEqual(f.highlighted(), ["ten"]);
+  carMode = false;
+  hook.rerender();
+  assert.deepEqual(f.highlighted(), []);
+  const stopped = f.scroll();
+  f.store.set(f.progress("one"));
+  assert.equal(f.scroll(), stopped);
+});
+
+test("unmatched speech and a missing container clear the last highlighted word", (t) => {
+  const f = fixture(t);
+  f.store.set(f.progress("one"));
+  const hook = renderHook(() => useSpeechFollow(f.store, f.ref, "view"));
+  t.after(() => hook.unmount());
+  f.store.set({ key: "session:answer", text: "Unmatched vocabulary", charIndex: 0 });
+  assert.deepEqual(f.highlighted(), []);
+  f.store.set(f.progress("two"));
+  assert.deepEqual(f.highlighted(), ["two"]);
+  f.ref.current = null;
+  f.store.set(f.progress("three"));
+  assert.deepEqual(f.highlighted(), []);
 });

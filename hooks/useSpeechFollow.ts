@@ -14,7 +14,13 @@ export function useSpeechFollow(store: SpeechProgressStore | null, containerRef:
   } | null>(null);
 
   useLayoutEffect(() => {
+    let highlighted: HTMLElement[] = [];
+    const clearHighlight = () => {
+      for (const element of highlighted) element.removeAttribute("data-speech-current-word");
+      highlighted = [];
+    };
     const follow = () => {
+      clearHighlight();
       const container = containerRef.current;
       const progress = store?.getSnapshot();
       if (!progress || !container) { cacheRef.current = null; return; }
@@ -40,6 +46,11 @@ export function useSpeechFollow(store: SpeechProgressStore | null, containerRef:
       const first = cache.parts.find((part) => part.start <= match.start && part.end > match.start);
       const last = cache.parts.find((part) => part.start < match.end && part.end >= match.end);
       if (!first || !last) return;
+      highlighted = Array.from(new Set(cache.parts
+        .filter((part) => part.start < match.end && part.end > match.start)
+        .map((part) => part.node.parentElement?.closest<HTMLElement>("[data-speech-word]"))
+        .filter((element): element is HTMLElement => Boolean(element))));
+      for (const element of highlighted) element.setAttribute("data-speech-current-word", "");
       const range = document.createRange();
       range.setStart(first.node, match.start - first.start);
       range.setEnd(last.node, match.end - last.start);
@@ -47,6 +58,6 @@ export function useSpeechFollow(store: SpeechProgressStore | null, containerRef:
     };
     follow();
     const unsubscribe = store?.subscribe(follow);
-    return () => { unsubscribe?.(); cacheRef.current = null; };
+    return () => { unsubscribe?.(); clearHighlight(); cacheRef.current = null; };
   }, [store, containerRef, viewKey]);
 }

@@ -149,5 +149,7 @@ test("car view keeps extension dialogs and the same voice handoff", () => {
   assert.match(chat, /useAllCarHistory\(/);
   assert.match(chat, /useCarScrollReturn\(carMode, scrollContainerRef/);
   assert.match(chat, /inert=\{carMode\}/);
-  assert.match(chat, /useSpeechFollow\(speechProgress, carMode \? carConversationRef : scrollContainerRef, messages\)/);
+  assert.match(chat, /useSpeechFollow\(carMode \? speechProgress : null, carConversationRef, messages\)/);
+  assert.doesNotMatch(chat, /useSpeechFollow\([^;]*scrollContainerRef/);
+  assert.match(css, /\[data-speech-current-word\]\s*\{\s*font-weight: 800/);
 });

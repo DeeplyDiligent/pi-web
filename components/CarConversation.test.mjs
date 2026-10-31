@@ -25,9 +25,12 @@ test("car history renders multiple Q&A and keeps stable playback keys for every 
     messages, messageKeys: ["q1", "a1", "q2", "a2"], sessionKey: "session", containerRef: { current: null },
     speechProgress: null, loadingHistory: false, historyError: false,
   })));
-  for (const text of ["First question", "First answer", "Second question", "Second answer"]) assert.ok(html.includes(text));
-  assert.ok(html.indexOf("First question") < html.indexOf("First answer"));
-  assert.ok(html.indexOf("First answer") < html.indexOf("Second question"));
+  const textHtml = html.replace(/<span data-speech-word="">([^<]*)<\/span>/g, "$1");
+  for (const text of ["First question", "First answer", "Second question", "Second answer"]) assert.ok(textHtml.includes(text));
+  assert.ok(textHtml.indexOf("First question") < textHtml.indexOf("First answer"));
+  assert.ok(textHtml.indexOf("First answer") < textHtml.indexOf("Second question"));
+  assert.match(html, /data-speech-word/);
+  assert.doesNotMatch(html, /data-speech-current-word/);
   assert.match(html, /data-speech-response-key="session:a1"/);
   assert.match(html, /data-speech-response-key="session:a2"/);
   assert.doesNotMatch(html, /<button|Load earlier|Load more/);

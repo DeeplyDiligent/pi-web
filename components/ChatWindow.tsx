@@ -344,7 +344,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   const isStreaming = useStreamingSelector(streamingStore, selectIsStreaming);
   const sessionBusy = agentRunning || bashRunning || editingMessage;
   const carConversationRef = useRef<HTMLDivElement>(null);
-  useSpeechFollow(speechProgress, carMode ? carConversationRef : scrollContainerRef, messages);
+  useSpeechFollow(carMode ? speechProgress : null, carConversationRef, messages);
   const handledAutoReadRequestRef = useRef(0);
   const lastAutoReadKeyRef = useRef<string | null>(null);
   useEffect(() => {
