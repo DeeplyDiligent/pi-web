@@ -3,6 +3,10 @@ export interface SpeechProgress {
   /** The prepared text, not Markdown. Boundary offsets refer to this string. */
   text: string;
   charIndex: number;
+  /** Native word timing is optional. Otherwise highlight the utterance's sentence. */
+  wordBoundary?: boolean;
+  sentenceStart?: number;
+  sentenceEnd?: number;
 }
 
 export interface SpeechProgressStore {
@@ -22,23 +26,35 @@ export function createSpeechProgressStore(): SpeechProgressStore {
   };
 }
 
-/** Short utterances also provide a paragraph-sized fallback on voices without boundary events. */
-export function splitSpeechText(text: string, maxChars = 320): { text: string; start: number }[] {
-  const chunks: { text: string; start: number }[] = [];
-  let start = 0;
-  while (start < text.length) {
-    while (/\s/.test(text[start] ?? "") && start < text.length) start++;
-    if (start >= text.length) break;
-    let end = text.length;
-    if (end - start > maxChars) {
-      const sample = text.slice(start, start + maxChars + 1);
-      const sentence = Math.max(sample.lastIndexOf(". "), sample.lastIndexOf("! "), sample.lastIndexOf("? "), sample.lastIndexOf("\n"));
-      const space = sample.lastIndexOf(" ");
-      end = start + (sentence > maxChars / 2 ? sentence + 1 : space > 0 ? space : maxChars);
+/** Each sentence gets its own utterance, so even voices without boundaries report reliable sentence progress. */
+export function splitSpeechText(text: string, maxChars = 320): { text: string; start: number; sentenceStart: number; sentenceEnd: number }[] {
+  const chunks: { text: string; start: number; sentenceStart: number; sentenceEnd: number }[] = [];
+  const limit = Number.isFinite(maxChars) ? Math.max(2, Math.floor(maxChars)) : 320;
+  const segmenter = typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, { granularity: "sentence" }) : null;
+  for (const line of text.matchAll(/[^\r\n]+/g)) {
+    const sentences = segmenter ? Array.from(segmenter.segment(line[0]))
+      : Array.from(line[0].matchAll(/\S[\s\S]*?(?:[.!?]+["'”’\])]*(?=\s|$)|[。！？]+|$)/g), (match) => ({ segment: match[0], index: match.index }));
+    for (const sentence of sentences) {
+      const content = sentence.segment.trim();
+      if (!content) continue;
+      const sentenceStart = line.index + sentence.index + sentence.segment.indexOf(content);
+      const sentenceEnd = sentenceStart + content.length;
+      let start = sentenceStart;
+      while (start < sentenceEnd) {
+        while (start < sentenceEnd && /\s/.test(text[start])) start++;
+        if (start >= sentenceEnd) break;
+        let end = Math.min(sentenceEnd, start + limit);
+        if (end < sentenceEnd) {
+          const space = text.slice(start, end + 1).search(/\s\S*$/);
+          if (space > 0) end = start + space;
+          // An unbroken Unicode word may need a hard cut; keep surrogate pairs intact.
+          else if (text.charCodeAt(end - 1) >= 0xD800 && text.charCodeAt(end - 1) <= 0xDBFF) end--;
+        }
+        const chunk = text.slice(start, end).trimEnd();
+        if (chunk) chunks.push({ text: chunk, start, sentenceStart, sentenceEnd });
+        start = end;
+      }
     }
-    const chunk = text.slice(start, end).trimEnd();
-    if (chunk) chunks.push({ text: chunk, start });
-    start = end;
   }
   return chunks;
 }
@@ -63,14 +79,14 @@ export function createSpeechTextTracker(spoken: string, visible: string) {
   });
   let previousSpeech = -1;
   let previousVisible = 0;
-  return (charIndex: number): { start: number; end: number } | null => {
+  const trackWord = (charIndex: number, endCharIndex = Infinity): { start: number; end: number } | null => {
     let index = speechWords.findIndex((word) => word.end > charIndex);
     if (index < 0) index = speechWords.length - 1;
     if (index < previousSpeech) previousVisible = 0;
     previousSpeech = index;
     // Skip invented words such as "Table with headings", but only a few words,
     // so a mismatch never scrolls ahead to a later paragraph.
-    for (let next = index; next >= 0 && next < Math.min(index + 5, speechWords.length); next++) {
+    for (let next = index; next >= 0 && next < Math.min(index + 5, speechWords.length) && speechWords[next].start < endCharIndex; next++) {
       const options = candidates.get(speechWords[next].text) ?? [];
       let best = -1;
       let bestScore = -1;
@@ -91,6 +107,17 @@ export function createSpeechTextTracker(spoken: string, visible: string) {
       }
     }
     return null;
+  };
+  return (charIndex: number, endCharIndex?: number): { start: number; end: number } | null => {
+    if (endCharIndex === undefined) return trackWord(charIndex);
+    let start: number | undefined;
+    let end: number | undefined;
+    for (const word of speechWords) {
+      if (word.start < charIndex || word.start >= endCharIndex) continue;
+      const match = trackWord(word.start, endCharIndex);
+      if (match) { start ??= match.start; end = match.end; }
+    }
+    return start !== undefined && end !== undefined ? { start, end } : null;
   };
 }
 

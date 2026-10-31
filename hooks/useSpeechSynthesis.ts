@@ -61,11 +61,15 @@ export function useSpeechSynthesis(locale: string) {
       const chunk = chunks[index];
       const utterance = new SpeechSynthesisUtterance(chunk.text);
       utterance.lang = locale;
-      const reportProgress = (offset: number) => {
-        if (generationRef.current === generation) speechProgress.set({ key, text, charIndex: chunk.start + offset });
+      const reportProgress = (offset: number, wordBoundary = false) => {
+        if (generationRef.current === generation) speechProgress.set({
+          key, text, charIndex: chunk.start + offset, wordBoundary,
+          sentenceStart: chunk.sentenceStart, sentenceEnd: chunk.sentenceEnd,
+        });
       };
       reportProgress(0);
-      utterance.onboundary = (event) => reportProgress(event.charIndex);
+      // A voice that only reports offset 0 has not provided word-level timing.
+      utterance.onboundary = (event) => reportProgress(event.charIndex, event.name === "word" && event.charIndex > 0);
       utterance.onend = () => speakChunk(index + 1);
       utterance.onerror = () => {
         if (generationRef.current === generation) {

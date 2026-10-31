@@ -11,6 +11,8 @@ export function useSpeechFollow(store: SpeechProgressStore | null, containerRef:
     text: string;
     parts: TextPart[];
     track: ReturnType<typeof createSpeechTextTracker>;
+    trackSentence: ReturnType<typeof createSpeechTextTracker>;
+    sentence: { start: number; end: number; match: { start: number; end: number } | null } | null;
   } | null>(null);
 
   useLayoutEffect(() => {
@@ -38,7 +40,8 @@ export function useSpeechFollow(store: SpeechProgressStore | null, containerRef:
           parts.push({ node, start: visible.length, end: visible.length + node.length });
           visible += node.data + " ";
         }
-        cache = { root, text: progress.text, parts, track: createSpeechTextTracker(progress.text, visible) };
+        cache = { root, text: progress.text, parts, track: createSpeechTextTracker(progress.text, visible),
+          trackSentence: createSpeechTextTracker(progress.text, visible), sentence: null };
         cacheRef.current = cache;
       }
       const match = cache.track(progress.charIndex);
@@ -46,8 +49,17 @@ export function useSpeechFollow(store: SpeechProgressStore | null, containerRef:
       const first = cache.parts.find((part) => part.start <= match.start && part.end > match.start);
       const last = cache.parts.find((part) => part.start < match.end && part.end >= match.end);
       if (!first || !last) return;
+      let highlightMatch = match;
+      if (!progress.wordBoundary && progress.sentenceStart !== undefined && progress.sentenceEnd !== undefined) {
+        if (!cache.sentence || cache.sentence.start !== progress.sentenceStart || cache.sentence.end !== progress.sentenceEnd) {
+          cache.sentence = { start: progress.sentenceStart, end: progress.sentenceEnd,
+            match: cache.trackSentence(progress.sentenceStart, progress.sentenceEnd) };
+        }
+        if (!cache.sentence.match) return;
+        highlightMatch = cache.sentence.match;
+      }
       highlighted = Array.from(new Set(cache.parts
-        .filter((part) => part.start < match.end && part.end > match.start)
+        .filter((part) => part.start < highlightMatch.end && part.end > highlightMatch.start)
         .map((part) => part.node.parentElement?.closest<HTMLElement>("[data-speech-word]"))
         .filter((element): element is HTMLElement => Boolean(element))));
       for (const element of highlighted) element.setAttribute("data-speech-current-word", "");

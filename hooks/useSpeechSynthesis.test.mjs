@@ -85,6 +85,31 @@ test("speech reports prepared-text boundary positions and completes once", () =>
   hook.unmount();
 });
 
+test("boundary-free speech highlights each complete sentence and advances only when it finishes", () => {
+  const hook = renderHook(() => useSpeechSynthesis("en"));
+  const text = "First sentence. Second sentence.";
+  hook.result.speakResponse(text, "answer");
+  hook.flush();
+  assert.equal(utterances[0].text, "First sentence.");
+  const first = hook.result.speechProgress.getSnapshot();
+  assert.equal(first.wordBoundary, false);
+  assert.equal(text.slice(first.sentenceStart, first.sentenceEnd), "First sentence.");
+  // A start-only event must not leave just the first word bold for the sentence.
+  utterances[0].onboundary({ name: "word", charIndex: 0 });
+  assert.equal(hook.result.speechProgress.getSnapshot().wordBoundary, false);
+  utterances[0].onend();
+  hook.flush();
+  assert.equal(utterances[1].text, "Second sentence.");
+  const second = hook.result.speechProgress.getSnapshot();
+  assert.equal(second.wordBoundary, false);
+  assert.equal(text.slice(second.sentenceStart, second.sentenceEnd), "Second sentence.");
+  utterances[1].onboundary({ name: "word", charIndex: 7 });
+  assert.equal(hook.result.speechProgress.getSnapshot().wordBoundary, true, "advancing native word events still allow word highlighting");
+  utterances[1].onend();
+  assert.equal(hook.result.speechProgress.getSnapshot(), null);
+  hook.unmount();
+});
+
 test("cancelled, replaced and failed speech cannot move the reader or start listening", () => {
   const hook = renderHook(() => useSpeechSynthesis("en"));
   let completions = 0;

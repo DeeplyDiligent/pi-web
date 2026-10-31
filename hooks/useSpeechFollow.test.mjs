@@ -83,6 +83,24 @@ test("car speech follows and bolds only the current word, without rendering or s
   assert.equal(f.scroll(), stopped, "unmount removes the speech subscription");
 });
 
+test("a boundary-free sentence stays fully bold until the next sentence starts", (t) => {
+  const f = fixture(t);
+  const boundary = f.text.indexOf("six");
+  const sentence = (word, start, end, wordBoundary = false) => ({ ...f.progress(word), sentenceStart: start, sentenceEnd: end, wordBoundary });
+  f.store.set(sentence("one", 0, boundary));
+  const hook = renderHook(() => useSpeechFollow(f.store, f.ref, "view"));
+  t.after(() => hook.unmount());
+  assert.deepEqual(f.highlighted(), ["one", "two", "three", "four", "five"]);
+  f.store.set(sentence("one", 0, boundary));
+  assert.deepEqual(f.highlighted(), ["one", "two", "three", "four", "five"], "start-only boundaries preserve the whole sentence");
+  f.store.set(sentence("six", boundary, f.text.length));
+  assert.deepEqual(f.highlighted(), ["six", "seven", "eight", "nine", "ten"]);
+  f.store.set(sentence("eight", boundary, f.text.length, true));
+  assert.deepEqual(f.highlighted(), ["eight"], "genuine advancing word events can highlight a word");
+  f.store.set(null);
+  assert.deepEqual(f.highlighted(), []);
+});
+
 test("normal mode never follows speech, and leaving car mode clears the highlight and subscription", (t) => {
   const f = fixture(t);
   let carMode = false;
