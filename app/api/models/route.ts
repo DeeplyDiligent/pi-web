@@ -15,6 +15,7 @@ import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-acces
 import { invalidateModelsCache } from "@/lib/models-cache";
 import { rememberProviderModels, withDeferredProviderModels } from "@/lib/deferred-provider-models";
 import { inferRemovedWorktree } from "@/lib/worktree";
+import { cwdMissingBody } from "@/lib/missing-cwd";
 
 export const dynamic = "force-dynamic";
 
@@ -120,7 +121,8 @@ async function respondWithModels(req: Request, forceCopilot: boolean) {
   try {
     cwdStat = await stat(cwd);
   } catch {
-    return Response.json({ error: `Directory does not exist: ${cwd}` }, { status: 400 });
+    // Typed: a moved project's session is not a model problem (#1422).
+    return Response.json(cwdMissingBody(cwd), { status: 400 });
   }
   if (!cwdStat.isDirectory()) {
     return Response.json({ error: `Not a directory: ${cwd}` }, { status: 400 });
