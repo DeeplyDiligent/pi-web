@@ -14,6 +14,8 @@ export interface ModelsData {
   copilotCatalog?: { checkedAt?: number; warning?: string };
   /** Warnings from resolving the `enabledModels` scope (e.g. a pattern matched nothing). */
   modelScopeWarnings?: string[];
+  /** True when enabledModels is active and restricting the model list. */
+  isScoped?: boolean;
 }
 
 interface ModelsCacheState {

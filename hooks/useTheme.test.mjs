@@ -113,13 +113,13 @@ test("metadata has a single declarative owner, with no pre-hydration mutation", 
 });
 
 test("manifest does not pin Android's system bar to one colour", async () => {
-  const manifestSource = await readFile(new URL("../app/manifest.ts", import.meta.url), "utf8");
+  const manifestSource = await readFile(new URL("../app/manifest.webmanifest/route.ts", import.meta.url), "utf8");
   const iconSource = await readFile(new URL("../lib/app-icons.ts", import.meta.url), "utf8");
   const icons = { exports: {}, process: { env: {} } };
   vm.runInNewContext(compile(iconSource), icons);
-  const context = { exports: {}, process: { env: {} }, require: () => icons.exports };
+  const context = { exports: {}, Response, process: { env: {} }, require: () => icons.exports };
   vm.runInNewContext(compile(manifestSource), context);
-  const manifest = context.exports.default();
+  const manifest = await context.exports.GET().json();
   assert.equal(Object.hasOwn(manifest, "theme_color"), false);
   assert.equal(Object.hasOwn(JSON.parse(JSON.stringify(manifest)), "theme_color"), false);
   assert.equal(manifest.background_color, "#ffffff");

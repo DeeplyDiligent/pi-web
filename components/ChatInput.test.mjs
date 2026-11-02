@@ -19,6 +19,14 @@ const { ModelSelector } = await jiti.import("./ModelSelector.tsx");
 const { clearDraft, getDraft, mergeRestoredSubmissionDraft, mergeRestoredSubmissionText, rekeyDraft, setDraft } = await jiti.import("@/lib/draft-store");
 const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 
+test("the side-chat action stays in the fork's visible streaming composer row", () => {
+  const html = renderToStaticMarkup(React.createElement(I18nProvider, null, React.createElement(ChatInput, {
+    onSend() {}, onAbort() {}, onSideChat() {}, onSteer() {}, onFollowUp() {}, isStreaming: true,
+  })));
+  assert.match(html, /class="chat-composer-primary-actions"><button[^>]*class="chat-composer-queue-action chat-composer-side"/);
+  assert.match(html, /aria-label="Side chat"/);
+});
+
 test("car dictation follows the bottom on transcript updates and resize", () => {
   const source = ts.createSourceFile("ChatInput.tsx", readFileSync(new URL("./ChatInput.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   function findEffect(node) {
@@ -745,6 +753,10 @@ test("locks built-in command submission until it settles", async () => {
 test("keeps only read-only built-ins available while a run is active", () => {
   assert.equal(canRunBuiltinSlashCommandWhileStreaming("/copy"), true);
   assert.equal(canRunBuiltinSlashCommandWhileStreaming("/session"), true);
+  // /side forks the session at file level, so a side question during a long
+  // parent run is the primary use case (ADR 0007).
+  assert.equal(canRunBuiltinSlashCommandWhileStreaming("/side"), true);
+  assert.equal(canRunBuiltinSlashCommandWhileStreaming("/side why did the test fail?"), true);
   assert.equal(canRunBuiltinSlashCommandWhileStreaming("/compact"), false);
   assert.equal(canRunBuiltinSlashCommandWhileStreaming("/auto-compact"), false);
   assert.equal(canRunBuiltinSlashCommandWhileStreaming("/reload"), false);

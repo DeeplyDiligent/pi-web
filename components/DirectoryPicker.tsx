@@ -1,6 +1,6 @@
 "use client";
 
-import { type CSSProperties, type FormEvent, useCallback, useEffect, useState } from "react";
+import { type CSSProperties, type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "@/hooks/useI18n";
 
@@ -107,6 +107,7 @@ export function DirectoryPicker({ onCancel, onSelect, initialPath, busy = false,
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [newFolderBusy, setNewFolderBusy] = useState(false);
+  const backdropPressRef = useRef(false);
 
   const navigateTo = useCallback(async (directory?: string) => {
     setLoading(true);
@@ -158,7 +159,7 @@ export function DirectoryPicker({ onCancel, onSelect, initialPath, busy = false,
 
   const interactionBusy = busy || newFolderBusy;
   const hasUncommittedPath = pathInput.trim() !== currentPath;
-  const canSelect = Boolean(currentPath) && !hasUncommittedPath && !interactionBusy && !newFolderOpen;
+  const canSelect = Boolean(currentPath) && !hasUncommittedPath && !interactionBusy && !loading && !newFolderOpen;
   const canNavigateUp = Boolean(parentDirectory) || isWindowsDriveRoot(currentPath);
   const canCreateFolder = Boolean(currentPath) && drives === null && !loading && !interactionBusy;
 
@@ -171,8 +172,16 @@ export function DirectoryPicker({ onCancel, onSelect, initialPath, busy = false,
       aria-modal="true"
       aria-busy={interactionBusy}
       aria-label={t("directoryPicker.selectDirectory")}
+      onPointerDown={(event) => {
+        backdropPressRef.current = event.target === event.currentTarget;
+      }}
       onClick={(event) => {
-        if (event.target === event.currentTarget && !interactionBusy) onCancel();
+        const pressedBackdrop = backdropPressRef.current;
+        backdropPressRef.current = false;
+        if (pressedBackdrop && event.target === event.currentTarget && !interactionBusy) onCancel();
+      }}
+      onPointerCancel={() => {
+        backdropPressRef.current = false;
       }}
       onKeyDown={(event) => {
         if (event.key === "Escape" && !interactionBusy) onCancel();

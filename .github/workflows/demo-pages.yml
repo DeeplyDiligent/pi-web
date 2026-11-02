@@ -1,12 +1,16 @@
 name: Demo
 
 # Builds the static Pi Web demo in demo/ and publishes it to GitHub Pages.
-# Pull requests that touch the demo only build it. Forks also only build unless
-# the DEPLOY_DEMO_PAGES repository variable is true and Pages is configured.
+# main builds when the demo or package.json changes. Pull requests only build.
+# Forks deploy only when DEPLOY_DEMO_PAGES is true and Pages is configured.
 
 on:
   push:
     branches: [main]
+    paths:
+      - "demo/**"
+      - "package.json"
+      - ".github/workflows/demo-pages.yml"
   pull_request:
     paths:
       - "demo/**"

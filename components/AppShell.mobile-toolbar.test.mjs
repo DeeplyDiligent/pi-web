@@ -16,7 +16,7 @@ test("uses a compact narrow-mobile toolbar with a floating action layer", () => 
   assert.match(source, /data-mobile-toolbar="true"[\s\S]*?flex: 1,[\s\S]*?minWidth: 0/);
   assert.match(
     source,
-    /data-mobile-toolbar-actions="true"[\s\S]*?position: "absolute"[\s\S]*?right: TOP_BAR_ICON_BUTTON_SIZE \* 2,[\s\S]*?left: TOP_BAR_ICON_BUTTON_SIZE/,
+    /data-mobile-toolbar-actions="true"[\s\S]*?position: "absolute"[\s\S]*?right: `calc\(2 \* \$\{TOP_BAR_ICON_BUTTON_SIZE\}\)`,[\s\S]*?left: `calc\(2 \* \$\{TOP_BAR_ICON_BUTTON_SIZE\}\)`/,
   );
 
   for (const action of ["history", "name", "agents", "branches", "system", "tools"]) {
@@ -24,9 +24,10 @@ test("uses a compact narrow-mobile toolbar with a floating action layer", () => 
   }
 });
 
-test("only renders the Agents switcher when the active session family has subagents", () => {
-  assert.match(source, /const hasSubagentSessions = Boolean\(activeSessionFamily\?\.subagents\.length\)/);
-  assert.match(source, /\{hasSubagentSessions && agentsBadge && \(\s*<button[\s\S]*?toggleTopPanel\("agents", mobile\)/);
+test("keeps Agents available for side chats and disables it only without a session family", () => {
+  assert.match(source, /const renderAgentsButton = \(mobile: boolean\) => \(/);
+  assert.match(source, /disabled=\{!activeSessionFamily\}/);
+  assert.match(source, /\{isNarrowMobile && renderAgentsButton\(true\)\}/);
   assert.match(source, /activeTopPanel === "agents" && activeSessionFamily && selectedSession/);
 });
 
