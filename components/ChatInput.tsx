@@ -3017,6 +3017,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
 
         {/* One compact toolbar: primary actions stay visible; secondary controls collapse on mobile. */}
         <div className="chat-composer-toolbar" style={{
+          position: "relative",
           marginTop: 0,
           display: "flex",
           alignItems: "center",
@@ -3146,7 +3147,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             display: "flex",
             alignItems: "center",
             justifyContent: "flex-end",
-            position: "relative",
+            // The streaming actions move this trigger left. Anchor the phone's
+            // popup to the full toolbar instead of its narrow button wrapper.
+            position: isMobile ? "static" : "relative",
             marginLeft: isMobile ? 0 : "auto",
           }}>
             {isMobile && (
@@ -3205,8 +3208,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 bottom: "calc(100% + 8px)",
                 zIndex: 60,
                 padding: 6,
-                width: "min(260px, calc(100vw - 24px))",
-                maxWidth: "calc(100vw - 24px)",
+                width: "min(260px, calc(100% - 8px))",
+                maxWidth: "calc(100% - 8px)",
                 flexDirection: "column",
                 alignItems: "stretch",
                 flexWrap: "nowrap",
