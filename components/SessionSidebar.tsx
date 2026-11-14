@@ -2101,6 +2101,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       runningIds: runningSessionIds,
       groupExpansion: shownGroupExpansion,
       pinnedCollapsed,
+      listView,
     }, sessionId);
     if (!location) return;
     if (location.unfoldPinned) {
@@ -2122,7 +2123,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       block: "nearest",
       ...(focus?.sessionId === sessionId ? { takeFocusFrom: focus.takeFocusFrom } : {}),
     });
-  }, [selectedSessionId, allSessions, uiState, runningSessionIds, shownGroupExpansion, groupExpansion, pinnedCollapsed, loading, uiStateLoaded, sidebarPrefsRestored, mainTreeShown, saveGroupChoices]);
+  }, [selectedSessionId, allSessions, uiState, runningSessionIds, shownGroupExpansion, groupExpansion, pinnedCollapsed, listView, loading, uiStateLoaded, sidebarPrefsRestored, mainTreeShown, saveGroupChoices]);
 
   // Fork (the row menu's F): the server copies the family's current branch
   // into a new session beside it (POST /api/sessions/[id]/fork) and leaves

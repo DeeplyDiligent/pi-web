@@ -453,13 +453,13 @@ export function buildSessionTree(input: SessionTreeInput): SessionTreeModel {
   // A spacer keeps the first section's header off the toolbar's line (#1338).
   const rows: SidebarRow[] = [{ kind: "spacer", key: "top-spacer" }];
 
-  // Pinned section: newest pin first; ties keep family activity order.
-  if (pinnedFamilies.length > 0) {
-    const pinnedAt = (family: SessionFamily) => finiteNumber(familyEntry(uiState, family.root.id)?.pinnedAt) ?? 0;
-    const sorted = pinnedFamilies
-      .map((family, index) => ({ family, index }))
-      .sort((a, b) => compareDesc(pinnedAt(a.family), pinnedAt(b.family)) || a.index - b.index)
-      .map(({ family }) => family);
+  // Both layouts put the newest pins first; ties keep family activity order.
+  const pinnedAt = (family: SessionFamily) => finiteNumber(familyEntry(uiState, family.root.id)?.pinnedAt) ?? 0;
+  const sorted = pinnedFamilies
+    .map((family, index) => ({ family, index }))
+    .sort((a, b) => compareDesc(pinnedAt(a.family), pinnedAt(b.family)) || a.index - b.index)
+    .map(({ family }) => family);
+  if (sorted.length > 0) {
     const { running, awaiting, unread } = activityCounts(sorted, input);
     rows.push({ kind: "pinned-header", key: "pinned-header", count: sorted.length, collapsed: input.pinnedCollapsed, running, awaiting, unread });
     if (!input.pinnedCollapsed) {
@@ -550,12 +550,14 @@ export function buildSessionTree(input: SessionTreeInput): SessionTreeModel {
   if (archivedCount > 0) rows.push({ kind: "footer-archived", key: "footer-archived", count: archivedCount });
 
   if (input.listView === "chronological") {
-    // No project limits or pin section: every live chat shares one activity order.
-    // Keep group row keys so fork reveal and focus return work in either view.
+    // Flat and unlimited: pins first, then unpinned chats by activity. Use the
+    // real context so the row menu and P shortcut offer Unpin for a saved pin.
     rows.length = 0;
-    for (const family of families) {
-      if (isFamilyArchived(family, uiState, runningIds)) continue;
-      const row = sessionRow(family, "group", resolver.get(familyProjectKey(family)), input);
+    const liveUnpinned = families.filter((family) => !isFamilyArchived(family, uiState, runningIds)
+      && !isFamilyPinned(family, uiState, runningIds));
+    for (const family of [...sorted, ...liveUnpinned]) {
+      const context = isFamilyPinned(family, uiState, runningIds) ? "pinned" : "group";
+      const row = sessionRow(family, context, resolver.get(familyProjectKey(family)), input);
       if (row.kind === "session") row.showProject = true;
       rows.push(row);
     }
@@ -1005,16 +1007,17 @@ export interface SessionRowLocation {
  * for it: not in the list (a fresh session not saved yet) or archived.
  */
 export function locateSessionRow(
-  input: Pick<SessionTreeInput, "sessions" | "uiState" | "runningIds" | "groupExpansion" | "pinnedCollapsed">,
+  input: Pick<SessionTreeInput, "sessions" | "uiState" | "runningIds" | "groupExpansion" | "pinnedCollapsed" | "listView">,
   sessionId: string,
 ): SessionRowLocation | null {
   const family = getSessionFamily(input.sessions, sessionId);
   if (!family || isFamilyArchived(family, input.uiState, input.runningIds)) return null;
   const projectKey = familyProjectKey(family);
+  const chronological = input.listView === "chronological";
   if (isFamilyPinned(family, input.uiState, input.runningIds)) {
-    return { rowKey: `session:pinned:${family.root.id}`, projectKey, unfoldPinned: input.pinnedCollapsed, unfoldGroup: false };
+    return { rowKey: `session:pinned:${family.root.id}`, projectKey, unfoldPinned: !chronological && input.pinnedCollapsed, unfoldGroup: false };
   }
-  const unfoldGroup = Object.hasOwn(input.groupExpansion, projectKey) && input.groupExpansion[projectKey] === false;
+  const unfoldGroup = !chronological && Object.hasOwn(input.groupExpansion, projectKey) && input.groupExpansion[projectKey] === false;
   return { rowKey: `session:group:${family.root.id}`, projectKey, unfoldPinned: false, unfoldGroup };
 }
 

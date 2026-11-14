@@ -23,6 +23,7 @@ import { checkModelContext } from "./model-context.mjs";
 import { checkModelSelector } from "./model-selector.mjs";
 import { checkFilesPlacement, showSidebarSessions } from "./sidebar.mjs";
 import { checkSessionNavigation } from "./session-navigation.mjs";
+import { checkLegacyPins } from "./legacy-pins.mjs";
 import { checkProjectNavigation, createProjectNavigationFixtures } from "./project-navigation.mjs";
 import { checkDirectoryPicker, createDirectoryPickerFixtures } from "./directory-picker.mjs";
 
@@ -556,6 +557,7 @@ try {
       assert.ok(response.ok, `DELETE session ${id} -> ${response.status}`);
     },
   });
+  await checkLegacyPins({ browser, base, artifacts, a: BRANCH, b: CODE_BACKGROUND, api, post });
   await checkProjectNavigation({ browser, base, artifacts, fixture: projectNavigation, otherSessionId: BRANCH, api, post });
   await checkDirectoryPicker({ browser, base, fixture: directoryPicker });
 } catch (error) {

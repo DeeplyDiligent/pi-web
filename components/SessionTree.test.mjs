@@ -323,6 +323,15 @@ test("pinned rows name their project and archived rows offer restore with the fa
   assert.doesNotMatch(archived, /aria-label="Archive"/);
 });
 
+test("classic pinned rows keep their project subtitle and activity time without repeating the project", () => {
+  const row = sessionRow(session("pin", { modified: new Date(NOW - 2 * 60 * MINUTE).toISOString() }), { context: "pinned" });
+  row.showProject = true;
+  const html = rowMarkup(render({ rows: [row] }), "session:pinned:pin");
+  assert.match(html, /class="session-tree-project-label" title="\/work\/app">app<\/span>/);
+  assert.match(html, /<span class="session-tree-meta">2h<\/span>/);
+  assert.doesNotMatch(html, /class="session-tree-project"/);
+});
+
 test("the phone layout uses tall rows, keeps ⋯ and drops the archive quick button", () => {
   const html = render({ layout: "mobile", rows: [groupRow(), sessionRow(session("m"))] });
   assert.match(html, /^<div class="session-tree is-mobile">/);

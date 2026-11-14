@@ -609,7 +609,7 @@ const SessionRowView = memo(function SessionRowView({
     meta = <span className="session-tree-unread" role="img" aria-label={t("sidebar.newSessionActivity")} />;
     metaState = " is-unread";
     metaTitle = t("sidebar.newActivity");
-  } else if (context === "pinned") {
+  } else if (context === "pinned" && !row.showProject) {
     meta = <span className="session-tree-project">{row.project.name}</span>;
   } else {
     meta = formatShortRelativeTime(family.latestModified, locale, nowDate);
