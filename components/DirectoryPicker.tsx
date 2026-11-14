@@ -108,8 +108,11 @@ export function DirectoryPicker({ onCancel, onSelect, initialPath, busy = false,
   const [newFolderName, setNewFolderName] = useState("");
   const [newFolderBusy, setNewFolderBusy] = useState(false);
   const backdropPressRef = useRef(false);
+  const pathInputRef = useRef<HTMLInputElement>(null);
+  const mountedRef = useRef(false);
 
-  const navigateTo = useCallback(async (directory?: string) => {
+  // Resolves to the listed folder's path, or null when it could not be listed.
+  const navigateTo = useCallback(async (directory?: string): Promise<string | null> => {
     setLoading(true);
     setLoadError(null);
     try {
@@ -122,8 +125,10 @@ export function DirectoryPicker({ onCancel, onSelect, initialPath, busy = false,
       setDrives(data.drives ?? null);
       setNewFolderOpen(false);
       setNewFolderName("");
+      return nextPath;
     } catch (cause) {
       setLoadError(cause instanceof Error ? cause.message : String(cause));
+      return null;
     } finally {
       setLoading(false);
     }
@@ -133,6 +138,18 @@ export function DirectoryPicker({ onCancel, onSelect, initialPath, busy = false,
     setPortalTarget(document.body);
     void navigateTo(initialPath || undefined);
   }, [initialPath, navigateTo]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  // Select and Go are disabled while they check, which drops focus to the page,
+  // where Escape stops the running agent instead of closing the picker. A
+  // refusal puts focus back in the field, to retype or dismiss.
+  useEffect(() => {
+    if (loadError || error) pathInputRef.current?.focus();
+  }, [loadError, error]);
 
   const handlePathSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -158,10 +175,17 @@ export function DirectoryPicker({ onCancel, onSelect, initialPath, busy = false,
   };
 
   const interactionBusy = busy || newFolderBusy;
-  const hasUncommittedPath = pathInput.trim() !== currentPath;
-  const canSelect = Boolean(currentPath) && !hasUncommittedPath && !interactionBusy && !loading && !newFolderOpen;
+  const typedPath = pathInput.trim();
+  const hasUncommittedPath = typedPath !== currentPath;
+  const canSelect = Boolean(typedPath) && !interactionBusy && !loading && !newFolderOpen;
   const canNavigateUp = Boolean(parentDirectory) || isWindowsDriveRoot(currentPath);
-  const canCreateFolder = Boolean(currentPath) && drives === null && !loading && !interactionBusy;
+  const canCreateFolder = Boolean(currentPath) && !hasUncommittedPath && drives === null && !loading && !interactionBusy;
+
+  const handleSelect = async () => {
+    const path = hasUncommittedPath ? await navigateTo(typedPath) : currentPath;
+    // Cancelled while it browsed: nothing is selected.
+    if (path && mountedRef.current) onSelect(path);
+  };
 
   if (!portalTarget) return null;
 
@@ -184,6 +208,7 @@ export function DirectoryPicker({ onCancel, onSelect, initialPath, busy = false,
         backdropPressRef.current = false;
       }}
       onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing || event.keyCode === 229) return;
         if (event.key === "Escape" && !interactionBusy) onCancel();
       }}
       style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.35)" }}
@@ -215,11 +240,12 @@ export function DirectoryPicker({ onCancel, onSelect, initialPath, busy = false,
             {t("directoryPicker.directoryPath")}
           </label>
           <input
+            ref={pathInputRef}
             className="directory-picker-path"
             id="directory-path"
             type="text"
             value={pathInput}
-            placeholder="/path/to/project or ~/project"
+            placeholder={t("directoryPicker.pathPlaceholder")}
             autoFocus
             autoComplete="off"
             spellCheck={false}
@@ -247,6 +273,7 @@ export function DirectoryPicker({ onCancel, onSelect, initialPath, busy = false,
             aria-busy={newFolderBusy}
             onSubmit={(event) => void handleCreateFolder(event)}
             onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing || event.keyCode === 229) return;
               if (event.key === "Escape" && !newFolderBusy) {
                 event.preventDefault();
                 event.stopPropagation();
@@ -366,9 +393,9 @@ export function DirectoryPicker({ onCancel, onSelect, initialPath, busy = false,
             <button
               className="directory-picker-action"
               type="button"
-              onClick={() => onSelect(currentPath)}
+              onClick={() => void handleSelect()}
               disabled={!canSelect}
-              title={hasUncommittedPath ? t("directoryPicker.openBeforeSelecting") : t("directoryPicker.selectCurrentDirectory")}
+              title={hasUncommittedPath ? t("directoryPicker.selectTypedPath", { path: typedPath }) : t("directoryPicker.selectCurrentDirectory")}
               style={{ padding: "6px 16px", border: 0, borderRadius: 6, background: "var(--accent)", color: "var(--accent-contrast)", fontSize: 13, fontWeight: 600, opacity: canSelect ? 1 : 0.6, cursor: canSelect ? "pointer" : "default" }}
             >
               {busy ? t("i18n.checking") : t("directoryPicker.selectThisFolder")}

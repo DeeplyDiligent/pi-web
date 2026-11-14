@@ -18,6 +18,7 @@ import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { BranchNavigator, hasSessionBranches } from "./BranchNavigator";
 import { SystemPromptPanel } from "./SystemPromptPanel";
 import { ToolDefinitionsPanel } from "./ToolDefinitionsPanel";
+import { AgentMiniStrip } from "./AgentMiniStrip";
 import { AgentSessionPanel } from "./AgentSessionPanel";
 import { DebugPanel, DebugPanelBoundary } from "./DebugPanel";
 import { SessionChatPanel } from "./SessionChatPanel";
@@ -81,7 +82,7 @@ import { formatActiveDuration, formatCompactCount, formatCostShort } from "@/lib
 import type { FileViewerState } from "@/lib/file-viewer-state";
 import { PRESET_READ_ONLY, type ToolEntry } from "@/lib/tool-presets";
 import { createSideChat, deleteSideChat } from "@/lib/side-chat-client";
-import { getAgentsBadge, getSessionFamily, isHiddenRelation, sideChatTitle } from "@/lib/session-family";
+import { getAgentStripMembers, getAgentsBadge, getSessionFamily, isHiddenRelation, sideChatTitle } from "@/lib/session-family";
 import { getLastSettingsSection, settingsSectionRequiresProject, type SettingsSection } from "@/lib/settings-navigation";
 import { focusIfLost } from "@/lib/stacked-dialog";
 
@@ -217,6 +218,13 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
   const agentsButtonLabel = agentsBadge?.running
     ? translate("agentSwitcher.titleRunning", { count: agentsBadge.count })
     : translate("agentSwitcher.title");
+  // A subagent or side chat in the main chat gets the Agents strip under the toolbar (#1658).
+  // It takes no state of its own: it shows whenever the full switcher is closed, so the Agents
+  // button swaps the two there, and opens and closes the switcher as before on the main agent.
+  const agentStripMembers = useMemo(
+    () => getAgentStripMembers(activeSessionFamily, selectedSession?.id),
+    [activeSessionFamily, selectedSession?.id],
+  );
   // The temporary id distinguishes consecutive fresh composers in one cwd.
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
   const [newSessionDraftId, setNewSessionDraftId] = useState("initial");
@@ -419,11 +427,13 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
   const [copiedSessionField, setCopiedSessionField] = useState<SessionCopyField | null>(null);
   const sessionCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleCopySessionField = useCallback((field: SessionCopyField, value: string) => {
+    // A refused copy is silent: no "Copied", and the rejection is handled
+    // so it never surfaces as an unhandled one (lib/clipboard.ts).
     void copyText(value).then(() => {
       if (sessionCopyTimerRef.current) clearTimeout(sessionCopyTimerRef.current);
       setCopiedSessionField(field);
       sessionCopyTimerRef.current = setTimeout(() => setCopiedSessionField(null), 1400);
-    });
+    }, () => {});
   }, []);
 
   useEffect(() => {
@@ -1496,6 +1506,13 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
       return remaining.at(-1)?.id ?? terminalTabs.at(-1)?.id ?? lastAgentTabId(agentTabs);
     });
   }, [fileTabs, terminalTabs, agentTabs]);
+
+  // An extension's ctx.shutdown() ended the session's runtime, as pi quits: leave it the
+  // way a deleted session is left (the refreshed list shows whether its file remains).
+  const handleSessionEnded = useCallback((sessionId: string) => {
+    handleSessionDeleted(sessionId);
+    handleCloseFileTab(`agent:${sessionId}`);
+  }, [handleSessionDeleted, handleCloseFileTab]);
 
   // The Agents switcher's Delete on a side chat: its tab goes with it, and the
   // main chat showing it goes back to the parent, as the Main agent row does
@@ -3077,6 +3094,15 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
           )}
 
         </div>
+        {agentStripMembers && activeSessionFamily && selectedSession && activeTopPanel !== "agents" && (
+          <AgentMiniStrip
+            rootSession={activeSessionFamily.root}
+            members={agentStripMembers}
+            selectedSessionId={selectedSession.id}
+            runningSessionIds={runningSessionIds}
+            onSelectSession={handleSelectSession}
+          />
+        )}
         {isMobile && renderProjectTrustWarning(true)}
         </div>
 
@@ -3097,6 +3123,7 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
               initialNewSessionChoices={selectedSession === null ? carriedNewSessionChoices : null}
               onNewSessionChoicesChange={handleNewSessionChoicesChange}
               onAgentEnd={handleAgentEnd}
+              onSessionEnded={handleSessionEnded}
               onToolEnd={handleToolEnd}
               onAttentionNeeded={handleAttentionNeeded}
               onSessionCreated={handleSessionCreated}
@@ -3307,6 +3334,7 @@ export function AppShell({ onSignOut }: { onSignOut?: () => void }) {
             <SessionChatPanel
               key={activeAgentTab.sessionId}
               sessionId={activeAgentTab.sessionId}
+              onSessionEnded={handleSessionEnded}
               running={runningSessionIds.has(activeAgentTab.sessionId)}
               initialPrompt={sideChatPrompts[activeAgentTab.sessionId]}
               onInitialPromptConsumed={() => setSideChatPrompts((prev) => {

@@ -69,6 +69,6 @@ test("chat applies editor content only after successful edit and offers actions 
   assert.match(chat, /onEdit=\{msg\.role === "user" && \(entryIds\[idx\] \|\| idx === lastUserIdx\)/);
   assert.doesNotMatch(chat, /onFork=\{sessionBusy|onNavigate=\{sessionBusy/);
   assert.match(chat, /showTimestamp && keyPrefix !== "process"/);
-  assert.match(source, /type: "fork_branch"/);
+  assert.match(source, /type: draft \? "fork" : "fork_branch"/);
   assert.match(source, /generation !== historyGenerationRef\.current/);
 });

@@ -9,6 +9,7 @@ import { syncCopilotModels } from "./copilot-discovery";
 import { randomUUID } from "node:crypto";
 import { rememberProviderModels } from "./deferred-provider-models";
 import { serializeByKey } from "./key-serializer";
+import { llamaCppExtension } from "./pi-sdk-internals";
 
 /**
  * The picker, enabled-model catalog and default validation must use the same
@@ -22,6 +23,7 @@ export async function createModelSelectionServices(cwd: string, { forceCopilot =
   const services = await createAgentSessionServices({
     cwd,
     agentDir,
+    resourceLoaderOptions: { extensionFactories: [llamaCppExtension] },
     ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),
   });
   const copilotCatalog = await syncCopilotModels(services.modelRuntime, {
@@ -47,7 +49,11 @@ export async function createModelSelectionServices(cwd: string, { forceCopilot =
  */
 export async function createModelRuntimeWithExtensions(): Promise<ModelRuntime> {
   const agentDir = getAgentDir();
-  const services = await createAgentSessionServices({ cwd: agentDir, agentDir });
+  const services = await createAgentSessionServices({
+    cwd: agentDir,
+    agentDir,
+    resourceLoaderOptions: { extensionFactories: [llamaCppExtension] },
+  });
   await rememberProviderModels(services.modelRuntime);
   return services.modelRuntime;
 }

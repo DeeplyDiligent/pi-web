@@ -15,6 +15,7 @@ import {
 import {
   buildEnabledModelsInput,
   buildEnabledModelsView,
+  createEnabledModelsSettingsManager,
   customProviderIds,
   modelRef,
   readEnabledModelsSettings,
@@ -38,7 +39,7 @@ interface RequestContext {
 }
 
 async function loadContext(cwd: string): Promise<RequestContext> {
-  const { modelRuntime: runtime, settingsManager } = await createModelSelectionServices(cwd);
+  const { modelRuntime: runtime } = await createModelSelectionServices(cwd);
   const modelRuntime = withDeferredProviderModels(runtime);
   const agentDir = getAgentDir();
   return {
@@ -46,7 +47,7 @@ async function loadContext(cwd: string): Promise<RequestContext> {
     // Authentication/provider availability only, never enabledModels scoping:
     // disabled models must remain in the catalog so they can be enabled again.
     models: await modelRuntime.getAvailable(),
-    settingsManager,
+    settingsManager: createEnabledModelsSettingsManager(cwd, agentDir),
     paths: { cwd, agentDir },
   };
 }
