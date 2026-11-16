@@ -1,5 +1,5 @@
 import type { AgentMessage, AssistantMessage } from "./types";
-import { isMessageGroupAnchor, splitFinalAssistantBlocks } from "./message-display";
+import { getTurnAnchors, splitFinalAssistantBlocks } from "./message-display";
 import { getAssistantSpeechText } from "./speech-text";
 
 export interface CarConversationRow {
@@ -11,6 +11,7 @@ export interface CarConversationRow {
 /** Every loaded Q&A, with the same final-answer boundary as the normal chat. */
 export function getCarConversationRows(messages: readonly AgentMessage[]): CarConversationRow[] {
   const rows: CarConversationRow[] = [];
+  const turnAnchors = getTurnAnchors(messages);
   let finalAssistant = -1;
   const finishTurn = () => {
     if (finalAssistant < 0) return;
@@ -20,7 +21,7 @@ export function getCarConversationRows(messages: readonly AgentMessage[]): CarCo
     finalAssistant = -1;
   };
   messages.forEach((message, index) => {
-    if (isMessageGroupAnchor(message)) finishTurn();
+    if (turnAnchors[index]) finishTurn();
     if (message.role === "user") {
       const text = typeof message.content === "string" ? message.content
         : message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
