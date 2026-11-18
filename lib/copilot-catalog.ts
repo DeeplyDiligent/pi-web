@@ -59,7 +59,10 @@ export function parseCopilotCatalog(
       ["/v1/messages", "anthropic-messages"],
       ["/chat/completions", "openai-completions"],
     ]);
-    const apis = endpoints.map((e) => supported.get(String(e))).filter(Boolean) as Api[];
+    // supported_endpoints is a capability set, not a preference list. Copilot
+    // advertises chat/completions first for MAI Code 2, but only Responses routes
+    // successfully. Keep vetted SDK choices; otherwise use our API priority.
+    const apis = [...supported].filter(([endpoint]) => endpoints.includes(endpoint)).map(([, api]) => api);
     const api = known && apis.includes(known.api) ? known.api : apis[0];
     const caps = record(entry.capabilities);
     const limits = record(caps.limits);

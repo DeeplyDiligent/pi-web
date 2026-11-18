@@ -1,6 +1,8 @@
 # Models and provider auth
 
 ## Local Copilot catalog
+`parseCopilotCatalog()` treats `supported_endpoints` as a set, not a preference list. Preserve a known SDK model's API when still advertised; for a new model prefer Responses, then Anthropic Messages, then Chat Completions. MAI Code 2 advertises Chat Completions first, but that route returns `400 no model endpoints available given user constraints` while Responses succeeds with the same account and reasoning level. Do not select the first endpoint in the catalog or retry failed prompts on another API automatically. Regression tests cover endpoint order, known-model preservation, and single-API fallback.
+
 The picker, default validation and enabled-model inventory keep using project-aware `createModelSelectionServices()` with direct Copilot discovery. Read-only global auth routes use upstream's shared extension runtime, with invalidation on plugin changes and session reload. Model ordering follows Pi's scope order rather than the former alphabetical name sort. `set_model` first performs upstream's bounded offline provider refresh, then reapplies direct Copilot discovery before looking up the model, so reselecting a saved definition does not lose the live Copilot catalog.
 
 The 0.15.0 merge keeps the direct Copilot discovery path and adds upstream's provider display names. The local composer's model selector is usable during streaming, but still disabled during speech recording or transcription. Mid-run switches sync live state instead of reloading the transcript, and the SDK applies the change on its next model request.
