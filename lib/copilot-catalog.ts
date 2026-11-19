@@ -15,6 +15,45 @@ function record(value: unknown): Record<string, unknown> {
 function positive(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
+function nonnegative(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+/** Copilot prices are USD cents per one million tokens in its flat-rate tier. */
+function copilotCost(entry: Record<string, unknown>, now = Date.now()): Model<Api>["cost"] | undefined {
+  const billing = record(entry.billing);
+  const prices = record(billing.token_prices);
+  if (prices.batch_size !== 1_000_000) return undefined;
+  const tiers = Object.entries(prices).filter(([name]) => name !== "batch_size");
+  // Pi has one cost tuple per model and cannot represent a context-tier jump.
+  // Import only a flat catalog price, never accidentally bill the default tier
+  // for a model whose long-context requests cost more.
+  if (tiers.some(([, tier]) => {
+    const candidate = record(tier);
+    const flat = record(prices.default);
+    return candidate.input_price !== flat.input_price
+      || candidate.cache_price !== flat.cache_price
+      || candidate.cache_write_price !== flat.cache_write_price
+      || candidate.output_price !== flat.output_price;
+  })) return undefined;
+  const price = record(prices.default);
+  if (!nonnegative(price.input_price) || !nonnegative(price.output_price)) return undefined;
+  const cacheRead = nonnegative(price.cache_price) ? price.cache_price : 0;
+  const cacheWrite = nonnegative(price.cache_write_price) ? price.cache_write_price : 0;
+  const promo = record(billing.promo);
+  const expiresAt = typeof promo.ends_at === "string" ? Date.parse(promo.ends_at) : NaN;
+  const discount = nonnegative(promo.discount_percent) && promo.discount_percent <= 100
+    && Number.isFinite(expiresAt) && expiresAt > now
+    ? promo.discount_percent / 100
+    : 0;
+  const dollars = (cents: number) => Number((cents * (1 - discount) / 100).toFixed(8));
+  return {
+    input: dollars(price.input_price),
+    output: dollars(price.output_price),
+    cacheRead: dollars(cacheRead),
+    cacheWrite: dollars(cacheWrite),
+  };
+}
 
 /** Never send IDE credentials to a URL supplied by a model entry or a redirect. */
 export function copilotCatalogUrl(baseUrl: string): string {
@@ -82,9 +121,11 @@ export function parseCopilotCatalog(
         thinkingLevelMap[level] = efforts.includes(mapped) ? mapped : null;
       }
     }
-    // Copilot doesn't consistently supply price units. Keep vetted SDK pricing;
-    // explicitly report unknown costs rather than guessing a currency conversion.
-    if (!known) unknownPricing.push(entry.id as string);
+    // Keep vetted SDK prices. For new models, Copilot's batch_size and token
+    // fields establish USD cents per million tokens; only flat tiers are safe
+    // because Pi stores one price tuple rather than context-threshold prices.
+    const catalogCost = known?.cost ?? copilotCost(entry);
+    if (!known && !catalogCost) unknownPricing.push(entry.id as string);
     models.set(entry.id as string, {
       ...(known ?? {}),
       id: entry.id as string,
@@ -96,7 +137,7 @@ export function parseCopilotCatalog(
       input: supports.vision === true ? ["text", "image"] : ["text"],
       contextWindow: limits.max_context_window_tokens,
       maxTokens: Math.min(limits.max_output_tokens, limits.max_context_window_tokens),
-      cost: known?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      cost: catalogCost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       headers: { ...COPILOT_HEADERS, ...known?.headers },
       ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
       compat: {

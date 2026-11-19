@@ -41,11 +41,15 @@ API, context/output limits, vision support and reasoning levels. Required IDE
 headers are included for every model. Known SDK compatibility/pricing metadata is
 retained; user model definitions and overrides remain the top layer.
 
-For genuinely new models, Copilot does not consistently supply documented pricing
-units. Pi Web warns when cost estimates are unavailable instead of inventing a
-currency conversion. Pi's numeric cost fields are then zero placeholders, **not a
-claim that the model is free**. Configure verified prices via modelOverrides if
-accurate cost accounting is required.
+New models with a flat Copilot `token_prices` block use its USD-cent rates per
+one million tokens. Active percentage promotions are applied until their
+`ends_at` time; MAI Code 2 currently becomes $0.50 input, $0.025 cached input,
+$0 cache write, and $2.50 output per million tokens from its advertised 50%
+promotion. Its list rates are $1.00 / $0.05 / $0 / $5.00. Tiered context prices
+are not mapped because Pi stores one cost tuple per model and the default tier
+would underestimate longer requests. Pi Web warns when a catalog has no safe
+price, leaving zero placeholders that are **not a claim that the model is free**.
+Configure verified prices via modelOverrides when needed.
 
 The same catalog is installed before agent construction, on model selection in an
 existing session, and after resource reload. This avoids models appearing in the
