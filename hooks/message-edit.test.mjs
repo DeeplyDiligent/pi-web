@@ -7,8 +7,8 @@ import vm from "node:vm";
 const source = await readFile(new URL("./useAgentSession.ts", import.meta.url), "utf8");
 const chat = await readFile(new URL("../components/ChatWindow.tsx", import.meta.url), "utf8");
 const start = source.indexOf("  const handleEdit = useCallback");
-const end = source.indexOf("  const handleNavigate", start);
-assert.ok(start > 0 && end > start);
+const callback = source.slice(start).match(/^  const handleEdit = useCallback[\s\S]*?^  \}, \[[^\n]*\]\);/m)?.[0];
+assert.ok(start > 0 && callback);
 
 function fixture(sendAgentCommand, loadSession = async () => {}) {
   const calls = [];
@@ -24,7 +24,7 @@ function fixture(sendAgentCommand, loadSession = async () => {}) {
     setBashRunning() {}, setPendingBash() {}, setIsCompacting() {}, setContextUsage() {}, setQueuedMessages() {},
     settleUiStage: () => calls.push("settle"), addNotice: (notice) => calls.push(["notice", notice]),
   });
-  vm.runInContext(stripTypeScriptTypes(source.slice(start, end) + "\nglobalThis.edit = handleEdit;"), context);
+  vm.runInContext(stripTypeScriptTypes(callback + "\nglobalThis.edit = handleEdit;"), context);
   return { context, calls };
 }
 

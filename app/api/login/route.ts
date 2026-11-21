@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getAuthRetryAfterMs, recordAuthFailure, recordAuthSuccess, retryAfterSeconds } from "@/lib/auth-throttle";
 import { hasJsonContentType } from "@/lib/request-security";
 import {
   createSessionToken,
@@ -23,12 +24,24 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }
 
-  if (!isValidWebPassword(body?.password)) {
+  // After reading the body, check, compare and record without yielding.
+  // Both password endpoints use this path and share one counter.
+  const retryAfterMs = getAuthRetryAfterMs();
+  if (retryAfterMs > 0) {
     return NextResponse.json(
-      { error: "Incorrect password" },
-      { status: 401, headers: { "Cache-Control": "no-store" } },
+      { error: "Too many failed attempts", retryAfterMs },
+      { status: 429, headers: { "Cache-Control": "no-store", "Retry-After": String(retryAfterSeconds(retryAfterMs)) } },
     );
   }
+  if (!isValidWebPassword(body?.password)) {
+    const delayMs = recordAuthFailure();
+    console.warn(`[web-auth] Password authentication failed; next attempt blocked for ${delayMs}ms`);
+    return NextResponse.json(
+      { error: "Invalid password", retryAfterMs: delayMs },
+      { status: 401, headers: { "Cache-Control": "no-store", "Retry-After": String(retryAfterSeconds(delayMs)) } },
+    );
+  }
+  recordAuthSuccess();
 
   const response = NextResponse.json({ authenticated: true });
   response.cookies.set({

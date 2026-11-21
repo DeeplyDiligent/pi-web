@@ -26,6 +26,14 @@ test("session list choices reuse the themed segmented control, not appearance sw
   }
 });
 
+test("signing out removes the stored drafts once the server signed out", async () => {
+  const panelSource = await readFile(new URL("./SettingsPanel.tsx", import.meta.url), "utf8");
+  assert.match(
+    panelSource,
+    /if \(!response\.ok\) throw new Error\([^\n]*\);\n(?:\s*\/\/[^\n]*\n)*\s*clearStoredDrafts\(\);\n\s*window\.location\.replace\("\/login"\);/,
+  );
+});
+
 test("the login page returns only to a destination safeLoginDestination() accepts", () => {
   assert.match(loginSource, /safeLoginDestination\(destination, window\.location\.origin\)/);
 });
