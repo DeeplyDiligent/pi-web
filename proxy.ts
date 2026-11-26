@@ -3,6 +3,7 @@ import {
   isApiRequestAllowed,
   isApiRequestHostAllowed,
 } from "@/lib/request-security";
+import { pageFramingHeaders } from "@/lib/frame-ancestors";
 import {
   isValidSessionToken,
   isWebPasswordEnabled,
@@ -11,9 +12,23 @@ import {
 
 const PUBLIC_AUTH_PATHS = new Set(["/api/session", "/api/login", "/api/logout", "/api/web-auth"]);
 
+function isApiPath(pathname: string): boolean {
+  return pathname === "/api" || pathname.startsWith("/api/");
+}
+
 export function proxy(request: NextRequest) {
+  const response = routeRequest(request);
+  // Every page answer, the redirects and refusals included, says who may
+  // frame it; see lib/frame-ancestors.ts. API answers are not pages.
+  if (!isApiPath(request.nextUrl.pathname)) {
+    for (const [key, value] of pageFramingHeaders()) response.headers.set(key, value);
+  }
+  return response;
+}
+
+function routeRequest(request: NextRequest): NextResponse {
   const pathname = request.nextUrl.pathname;
-  const isApiRequest = pathname === "/api" || pathname.startsWith("/api/");
+  const isApiRequest = isApiPath(pathname);
   const isTrustedRequest = isApiRequest
     ? isApiRequestAllowed(request)
     : isApiRequestHostAllowed(request);
@@ -34,6 +49,10 @@ export function proxy(request: NextRequest) {
       { error: "Authentication required" },
       { status: 401, headers: { "Cache-Control": "no-store" } },
     );
+  }
+
+  if (!isWebPasswordEnabled(password) && pathname === "/login") {
+    return NextResponse.redirect(new URL("/", request.url));
   }
 
   return NextResponse.next();

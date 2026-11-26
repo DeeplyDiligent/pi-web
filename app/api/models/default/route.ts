@@ -2,7 +2,6 @@ import { stat } from "fs/promises";
 import { resolve } from "path";
 import { createModelSelectionServices } from "@/lib/model-runtime";
 import {
-  isThinkingLevel,
   projectSettingsPath,
   shadowingProjectKeys,
   writeDefaultPreferences,
@@ -12,6 +11,8 @@ import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-acces
 import { resolveVisibleModels } from "@/lib/model-scope";
 import { withDeferredProviderModels } from "@/lib/deferred-provider-models";
 import { invalidateModelsCache } from "@/lib/models-cache";
+import { isThinkingLevel } from "@/lib/thinking-levels";
+import { errorMessage } from "@/lib/errors";
 
 export const dynamic = "force-dynamic";
 
@@ -104,6 +105,6 @@ export async function PUT(req: Request) {
       ...(edit.thinkingLevel ? { defaultThinkingLevel: edit.thinkingLevel } : {}),
     });
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+    return Response.json({ error: errorMessage(error) }, { status: 500 });
   }
 }

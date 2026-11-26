@@ -2,6 +2,7 @@
 
 import { memo, useLayoutEffect, useMemo, useRef, type RefObject } from "react";
 import type { AgentMessage } from "@/lib/types";
+import type { FileLinkTarget } from "@/lib/file-links";
 import type { SpeechProgressStore } from "@/lib/speech-follow";
 import { getCarConversationRows } from "@/lib/car-conversation";
 import { captureScrollDistance, isScrollAtTail, restoreScrollTop } from "@/lib/chat-lazy-load";
@@ -18,7 +19,7 @@ interface Props {
   historyError: boolean;
   busyLabel?: string;
   cwd?: string;
-  onOpenFile?: (path: string, page?: number) => void;
+  onOpenFile?: (path: string, target?: FileLinkTarget) => void;
 }
 
 export const CarConversation = memo(function CarConversation({ messages, messageKeys, sessionKey, containerRef, speechProgress, loadingHistory, historyError, busyLabel, cwd, onOpenFile }: Props) {

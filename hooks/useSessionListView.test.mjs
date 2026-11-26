@@ -26,9 +26,16 @@ function fixture({ initial = "projects", blocked = false, server = false } = {})
     }).outputText).runInNewContext(context);
     return context.exports;
   }
+  const storage = run("../lib/browser-storage.ts");
+  context.require = (id) => {
+    if (id === "./browser-storage" || id === "@/lib/browser-storage") return storage;
+    if (id === "./session-tree") return { RECENT_SECTIONS: ["today", "yesterday", "week", "older"] };
+    throw new Error(id);
+  };
   const prefs = run("../lib/sidebar-prefs.ts");
   context.require = (id) => {
     if (id === "@/lib/sidebar-prefs") return prefs;
+    if (id === "./browser-storage" || id === "@/lib/browser-storage") return storage;
     if (id === "react") return { useSyncExternalStore(subscribe, snapshot, serverSnapshot) {
       callbacks.push(subscribe);
       return server ? serverSnapshot() : snapshot();

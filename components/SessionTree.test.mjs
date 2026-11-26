@@ -192,12 +192,12 @@ test("a group's ⋯ shows its open menu; its + starts a session at once", () => 
 test("an idle session row shows its short time, branch and both actions", () => {
   const root = session("idle", { isWorktree: true, branch: "feat/rows" });
   const html = rowMarkup(render({ rows: [sessionRow(root)] }), "session:group:idle");
-  assert.match(html, /^<div class="session-tree-row session-tree-session" style="top:0;height:28px" data-row-key="session:group:idle">/);
+  assert.match(html, /^<div class="session-tree-row session-tree-session" style="top:0;height:28px" data-row-key="session:group:idle" draggable="true">/);
   // Nothing before the title: it gets the room; the time sits at the right.
   // A saved session's title is a real link to it (middle-click, Ctrl/Cmd-click).
   // The branch keeps the upstream icon and type; the tooltip keeps the ⑂ glyph.
   assert.match(html, /<a class="session-tree-main" href="\?session=idle" title="[^"]*"><span class="session-tree-title">first idle<\/span><span class="session-tree-branch"><svg width="10" height="10"[^>]*class="session-tree-branch-icon" aria-hidden="true">[\s\S]*?<\/svg>feat\/rows<\/span><span class="session-tree-meta">5m<\/span><\/a>/);
-  assert.match(html, /title="first idle\n\/work\/app\n3 msgs · 5 minutes ago · ⑂ feat\/rows"/);
+  assert.match(html, /title="first idle\n3 msgs · 5 minutes ago · ⑂ feat\/rows"/);
   assert.match(html, /class="session-tree-action session-tree-quick-action" aria-label="Archive" title="Archive"/);
   assert.match(html, /class="session-tree-action session-tree-more-action" aria-label="More actions" title="More actions" aria-haspopup="menu" aria-expanded="false"/);
   assert.doesNotMatch(html, /aria-current/);
@@ -332,6 +332,38 @@ test("classic pinned rows keep their project subtitle and activity time without 
   assert.doesNotMatch(html, /class="session-tree-project"/);
 });
 
+test("recent rows are pinned rows: the project in the right column until a status takes its place, and in the tooltip", () => {
+  const recent = rowMarkup(render({ rows: [sessionRow(session("r"), { context: "recent" })] }), "session:recent:r");
+  assert.match(recent, /<span class="session-tree-meta"><span class="session-tree-project">app<\/span><\/span>/);
+  assert.match(recent, /aria-label="Archive"/);
+  assert.match(recent, /title="first r\napp · 3 msgs · /);
+  for (const [status, mark] of [[{ running: true }, /is-running/], [{ unread: true }, /session-tree-unread/], [{ running: true, awaiting: true }, /session-tree-awaiting/]]) {
+    const row = rowMarkup(render({ rows: [sessionRow(session("s"), { context: "recent", status })] }), "session:recent:s");
+    assert.match(row, mark);
+    assert.doesNotMatch(row, /session-tree-project/, "a status takes the project's place");
+    assert.match(row, /title="first s\napp · /, "the tooltip still names it");
+  }
+  // A group's row needs no project: it is under its project's header.
+  assert.doesNotMatch(rowMarkup(render({ rows: [sessionRow(session("g"))] }), "session:group:g"), /title="first g\napp/);
+});
+
+test("a date section's header is the pinned header with its day's label", () => {
+  const sections = [["today", "Today"], ["yesterday", "Yesterday"], ["week", "Previous 7 days"], ["earlier", "Earlier"]];
+  for (const [section, label] of sections) {
+    const row = rowMarkup(render({
+      rows: [{ kind: "recent-header", key: `recent:${section}`, section, count: 4, collapsed: true, running: 0, awaiting: 1, unread: 0 }],
+    }), `recent:${section}`);
+    assert.match(row, new RegExp(`^<div class="session-tree-row session-tree-pinned-header" style="top:0;height:28px" data-row-key="recent:${section}">`));
+    assert.match(row, new RegExp(`<span class="session-tree-pinned-label">${label}</span><span class="session-tree-pinned-count">· 4</span><span class="session-tree-pinned-dot is-awaiting"`));
+    assert.match(row, /aria-expanded="false"/);
+  }
+  const open = rowMarkup(render({
+    rows: [{ kind: "recent-header", key: "recent:today", section: "today", count: 1, collapsed: false, running: 1, awaiting: 0, unread: 0 }],
+  }), "recent:today");
+  assert.match(open, /aria-expanded="true"/);
+  assert.doesNotMatch(open, /session-tree-pinned-dot/);
+});
+
 test("the phone layout uses tall rows, keeps ⋯ and drops the archive quick button", () => {
   const html = render({ layout: "mobile", rows: [groupRow(), sessionRow(session("m"))] });
   assert.match(html, /^<div class="session-tree is-mobile">/);
@@ -344,7 +376,7 @@ test("the phone layout uses tall rows, keeps ⋯ and drops the archive quick but
 
 test("a summary row without details shows an ellipsis instead of a message count", () => {
   const html = render({ rows: [sessionRow(session("p", { detailsPending: true, name: "Named" }))] });
-  assert.match(html, /title="Named\n\/work\/app\n… · 5 minutes ago"/);
+  assert.match(html, /title="Named\n… · 5 minutes ago"/);
 });
 
 test("rename mode swaps the row for a field seeded with the title", () => {
@@ -591,11 +623,11 @@ test("headers lead with their chevron, and every row's text starts in one column
   // No layout overrides these paddings, so phones line up the same way.
   assert.doesNotMatch(css, /\.is-mobile \.session-tree-(?:session|group-toggle|group-empty|more|pinned-toggle|archive-group|footer-button) \{[^}]*padding/);
   // One rhythm: session rows, every header (a project's, the pinned
-  // section's, the archive's projects), the empty note and the footer are
-  // one height, 28px (44px on a phone); only "show more" is shorter.
-  assert.deepEqual(SIDEBAR_ROW_HEIGHTS.desktop, { "pinned-header": 28, session: 28, "pinned-more": 26, group: 28, "group-more": 26, "group-empty": 28, spacer: 8, "footer-open": 28, "footer-archived": 28, "archive-group": 28 });
+  // section's, a date's, the archive's projects), the empty note and the
+  // footer are one height, 28px (44px on a phone); only "show more" is shorter.
+  assert.deepEqual(SIDEBAR_ROW_HEIGHTS.desktop, { "pinned-header": 28, session: 28, "pinned-more": 26, group: 28, "group-more": 26, "group-empty": 28, "recent-header": 28, spacer: 8, "footer-open": 28, "footer-archived": 28, "archive-group": 28 });
   for (const [layout, height] of [["desktop", 28], ["mobile", 44]]) {
-    for (const kind of ["session", "group", "pinned-header", "group-empty", "footer-open", "footer-archived", "archive-group"]) {
+    for (const kind of ["session", "group", "pinned-header", "recent-header", "group-empty", "footer-open", "footer-archived", "archive-group"]) {
       assert.equal(SIDEBAR_ROW_HEIGHTS[layout][kind], height, `${layout} ${kind}`);
     }
   }
